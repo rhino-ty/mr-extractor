@@ -8,3 +8,17 @@ build/
 .env
 venv/
 .venv/
+
+# Claude Code
+.claude
+.agent_cache/
+SKILL.md
+
+# PDCA, AI Agents with Project Context
+.pdca
+.agent
+.agents
+.bkit-memory.json
+.pdca-status.json
+.pdca-snapshots/
+.bkit

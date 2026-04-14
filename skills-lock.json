@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "pyqt6-ui-development-rules": {
+      "source": "oimiragieo/agent-studio",
+      "sourceType": "github",
+      "computedHash": "fe96e7f7ec47008ea18e2fadc35302a8b1e2ee8e62801d8408352205874d0fee"
+    },
+    "python-packaging": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "ff3e59808ce3fdf85a4ce0538f69f94a92d5d2863343bf26997509ec1e1ee014"
+    }
+  }
+}
