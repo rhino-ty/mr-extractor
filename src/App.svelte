@@ -2,6 +2,7 @@
   // Design Ref: §5.1 -- 공통 헤더 + 페이지 라우팅 셸
   import { page, navigateTo, goBack, pageHistory } from "$lib/stores";
   import { fade } from "svelte/transition";
+  import { derived } from "svelte/store";
 
   import SetupPage from "./pages/SetupPage.svelte";
   import QueuePage from "./pages/QueuePage.svelte";
@@ -13,15 +14,9 @@
   // 뒤로 버튼을 숨길 페이지 (메인 페이지들)
   const mainPages = new Set(["setup", "queue"]);
 
-  let showBack = false;
-  let historyLen = 0;
-
-  page.subscribe(() => {});
-  pageHistory.subscribe((h) => {
-    historyLen = h.length;
+  const showBack = derived([page, pageHistory], ([$p, $h]) => {
+    return !mainPages.has($p) && $h.length > 0;
   });
-
-  $: showBack = !mainPages.has($page) && historyLen > 0;
 </script>
 
 <div class="flex h-full flex-col bg-bg">
@@ -30,7 +25,7 @@
     class="flex items-center justify-between border-b border-border px-4 py-3"
   >
     <div class="flex items-center gap-3">
-      {#if showBack}
+      {#if $showBack}
         <button
           onclick={() => goBack()}
           class="rounded-lg px-2 py-1 text-sm text-muted transition-colors duration-200 hover:bg-surface hover:text-text"
