@@ -12,6 +12,8 @@
 
 - 오디오 → demucs 직접 투입
 - 영상 → ffmpeg로 WAV 추출 → demucs → tmp WAV 삭제
+- demucs 내부: `torchaudio.load()` 시도 → 실패 시 ffmpeg 폴백 (`AudioFile` 클래스)
+- 모델은 44100Hz 스테레오 기준. 다른 샘플레이트/모노는 자동 변환됨
 
 ---
 

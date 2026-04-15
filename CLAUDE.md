@@ -66,8 +66,9 @@ yt-dlp만 예외: 유튜브 정책 변경 대응을 위해 버전 제한 없음.
 ## demucs
 
 - `pip install demucs` 그대로 사용 (아카이브된 포크 설치 불필요)
-- 기본 모델: `htdemucs_ft` (SDR 9.20dB, fine-tuned)
+- 기본 모델: `htdemucs_ft` (SDR 9.20dB, fine-tuned, Bag of 4 모델이라 4배 느림)
 - 결과 경로: `tmp/*/stem/` 패턴 탐색 (모델명 하드코딩 금지)
+- ⚠ demucs는 `torchaudio<2.2` 제약 있음 — PyTorch 2.2+ 환경에서 충돌 가능. venv 격리 권장
 
 ## Do Not
 

@@ -25,9 +25,16 @@ sounddevice>=0.4,<1 librosa>=0.10,<1    yt-dlp (무제한)
 
 ```bash
 python -m demucs -n htdemucs_ft --out <tmp_dir> <input_file>
+
+# GPU 메모리 부족 시
+python -m demucs -n htdemucs_ft --segment 7 --out <tmp_dir> <input_file>
+
+# 노래방 모드 (vocals + no_vocals)
+python -m demucs -n htdemucs_ft --two-stems=vocals --out <tmp_dir> <input_file>
 ```
 
-결과: `<tmp_dir>/htdemucs_ft/<stem>/vocals.wav, drums.wav, bass.wav, other.wav`
+결과: `<tmp_dir>/<model_name>/<track_name>/vocals.wav, drums.wav, bass.wav, other.wav`
+⚠ 경로에 모델명 하드코딩 금지 → glob 패턴 탐색
 
 ## ffmpeg (영상 → 오디오 추출)
 
@@ -38,8 +45,9 @@ ffmpeg -i <video> -vn -acodec pcm_s16le -ar 44100 -ac 2 -y <output.wav>
 ## 앱 데이터 경로
 
 ```
-출력 폴더:  ~/Desktop/MR Extractor/
-히스토리:   %APPDATA%/MR Extractor/history.json
+출력 폴더:     ~/Desktop/MR Extractor/
+히스토리:      %APPDATA%/MR Extractor/history.json
+모델 캐시:     ~/.cache/torch/hub/checkpoints/
 ```
 
 ## 다크 테마 색상

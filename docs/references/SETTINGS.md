@@ -78,6 +78,12 @@ STORAGE_POLICY = {
 - **고아 파일 정리**: 히스토리에 없는 파일 탐지 → 선택 삭제
 - 용량 계산: `StorageScanWorker(QThread)` 백그라운드
 
+### 모델 캐시
+
+demucs 모델은 `~/.cache/torch/hub/checkpoints/`에 자동 다운로드됨.
+htdemucs_ft는 Bag of 4 모델이라 약 300~400MB 차지.
+저장 공간 계산 시 이 경로도 포함 가능 (선택적).
+
 ---
 
 ## 알림 설정

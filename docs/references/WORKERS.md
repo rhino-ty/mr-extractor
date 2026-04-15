@@ -19,13 +19,15 @@
 
 ```python
 PACKAGE_CONSTRAINTS = {
-    "demucs":        "demucs>=4,<5",
+    "demucs":        "demucs>=4,<5",        # ⚠ torchaudio<2.2 제약 포함
     "pydub":         "pydub>=0.25,<1",
     "static-ffmpeg": "static-ffmpeg>=2,<3",
     "yt-dlp":        "yt-dlp",              # 항상 최신
     "sounddevice":   "sounddevice>=0.4,<1",
     "librosa":       "librosa>=0.10,<1",
 }
+# 주의: demucs가 torchaudio<2.2를 요구하므로
+# PyTorch 2.2+ 환경에서는 venv 격리 또는 demucs-infer 대안 검토
 
 def run(self):
     # 1. 미설치 패키지 확인 → 설치
@@ -93,11 +95,15 @@ ydl_opts = {
 
 ## SeparationWorker
 
+### CLI 서브프로세스 방식 (현재 설계)
+
 ```python
 cmd = [sys.executable, "-m", "demucs",
        "-n", "htdemucs_ft",
        "--out", str(tmp),
        self.file_path]
+# GPU 메모리 부족 시: "--segment", "7" 추가 (VRAM 3~6GB)
+# 노래방 모드: "--two-stems", "vocals" 추가 (vocals + no_vocals 출력)
 ```
 
 stdout char 단위 읽기 → tqdm `\r` 처리 → `(\d+)%` 파싱.
@@ -109,6 +115,42 @@ stdout char 단위 읽기 → tqdm `\r` 처리 → `(\d+)%` 파싱.
 {"vocals": "path/vocals.wav", "drums": "path/drums.wav",
  "bass": "path/bass.wav", "other": "path/other.wav"}
 ```
+
+### Python API 대안 (권장 — CLI 파싱보다 안정적)
+
+```python
+import demucs.api
+
+separator = demucs.api.Separator(
+    model="htdemucs_ft",
+    device="cuda",           # auto: cuda > mps > cpu
+    callback=self._on_progress,
+    progress=False           # tqdm 비활성화
+)
+
+origin, separated = separator.separate_audio_file(self.file_path)
+# separated = {"vocals": tensor, "drums": tensor, ...}
+
+for stem, source in separated.items():
+    demucs.api.save_audio(source, f"{out_dir}/{stem}.wav",
+                          samplerate=separator.samplerate)
+```
+
+콜백으로 진행률 추적:
+```python
+def _on_progress(self, info):
+    if info["audio_length"]:
+        pct = int(info["segment_offset"] / info["audio_length"] * 100)
+        self.progress.emit(pct, f"분리 중... {pct}%")
+```
+
+### GPU 메모리 옵션
+
+| VRAM | 권장 |
+|---|---|
+| 3GB 미만 | `device="cpu"` |
+| 3~6GB | `segment=7` |
+| 7GB+ | 기본값 |
 
 ## StemPlayerWorker
 
