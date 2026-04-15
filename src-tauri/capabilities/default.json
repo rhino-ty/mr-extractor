@@ -1,0 +1,57 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "MR Extractor default permissions",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "python-demucs", "cmd": "python", "args": true },
+        { "name": "ffmpeg", "cmd": "ffmpeg", "args": true },
+        { "name": "ffprobe", "cmd": "ffprobe", "args": true },
+        { "name": "yt-dlp", "cmd": "yt-dlp", "args": true }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        { "name": "python-demucs", "cmd": "python", "args": true },
+        { "name": "ffmpeg", "cmd": "ffmpeg", "args": true },
+        { "name": "ffprobe", "cmd": "ffprobe", "args": true },
+        { "name": "yt-dlp", "cmd": "yt-dlp", "args": true }
+      ]
+    },
+    "shell:allow-stdin-write",
+    "shell:allow-kill",
+    "shell:allow-open",
+    "shell:default",
+    "fs:default",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-read-dir",
+    "fs:allow-mkdir",
+    "fs:allow-remove",
+    "fs:allow-exists",
+    "fs:allow-stat",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "dialog:allow-ask",
+    "notification:default",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+    "store:default",
+    "global-shortcut:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister-all",
+    "window-state:default",
+    "process:default",
+    "process:allow-exit",
+    "process:allow-restart"
+  ]
+}

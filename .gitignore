@@ -1,13 +1,22 @@
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
+# Dependencies
+node_modules/
+
+# Build
 dist/
-build/
-*.spec
+src-tauri/target/
+src-tauri/gen/
+
+# Environment
 .env
-venv/
-.venv/
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
 
 # Claude Code
 .claude
