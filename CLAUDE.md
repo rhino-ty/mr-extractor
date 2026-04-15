@@ -141,6 +141,37 @@ demucs>=4,<5 | yt-dlp (sidecar 번들) | ffmpeg (sidecar 번들)
 - Web Audio AudioContext를 컴포넌트마다 생성 금지 → 싱글턴 관리
 - ffmpeg 진행률 파싱 시 총 재생시간은 ffprobe로 사전 확인 필수
 
+## Design & Implementation Checklist
+
+Design 문서 작성 및 구현 시 반드시 검증. 중복/누락/불일치 방지.
+
+### Rust 커맨드
+- [ ] 구조체: `#[derive(Clone, serde::Serialize)]` (응답) / `serde::Deserialize` (입력)
+- [ ] 비동기: `async fn` + `Result<T, String>` 반환
+- [ ] Channel: 진행률 스트리밍 시 `Channel<T>` 파라미터 + `#[derive(Clone, serde::Serialize)]` 페이로드
+- [ ] 등록: `generate_handler![]`에 모든 커맨드 나열
+- [ ] 플러그인: `lib.rs`에 `.plugin(tauri_plugin_xxx::init())` 등록 확인
+- [ ] Shell scope: `tauri.conf.json` plugins.shell.scope에 신규 명령어 추가 확인
+
+### Svelte 프론트엔드
+- [ ] 페이지: `src/pages/` PascalCase, 라우팅 `stores.ts` page 상태와 일치
+- [ ] 컴포넌트: 재사용 위젯은 `src/components/`, 페이지 전용은 페이지 내부
+- [ ] 타입: `src/lib/types.ts`에 중앙 정의, Rust 구조체와 필드명 일치 (camelCase ↔ snake_case serde rename)
+- [ ] invoke 래퍼: `src/lib/commands.ts`에 정의, 컴포넌트에서 직접 invoke 금지
+- [ ] CSS: Tailwind 유틸리티 + `--color-*` CSS 변수, 하드코딩 색상 금지
+- [ ] transition: 페이지 전환 `fade`/`slide` (200ms)
+- [ ] Svelte 5 runes: `$state`, `$derived`, `$effect` 사용 (legacy `$:` 사용 금지)
+
+### Tauri 설정
+- [ ] capabilities: `default.json`에 신규 플러그인 권한 추가
+- [ ] sidecar: `tauri.conf.json` bundle.externalBin에 바이너리 경로
+- [ ] 윈도우: `app.windows` 크기/타이틀 설정 확인
+
+### 검증 절차 (구현 완료 후)
+1. code-analyzer 실행 → 구조적 이슈 발견 (누락 타입, 미등록 커맨드, 권한 누락 등)
+2. 유사 기능 코드 직접 Read 대조 → 패턴/네이밍/구조 일치 확인
+3. Rust 컴파일 경고 0개 + TypeScript 에러 0개 확인
+
 ## Page Flow
 
 ```
