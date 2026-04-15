@@ -2,84 +2,143 @@
 
 ## Project Overview
 
-MR Extractor: Demucs 기반 보컬 분리 및 반주(MR) 추출 데스크탑 앱 (Windows)
-Stack: PyQt6, demucs, yt-dlp, sounddevice, numpy, librosa, pydub, static-ffmpeg, PyInstaller
+MR Extractor: Demucs 기반 보컬 분리 및 반주(MR) 추출 데스크탑 앱
+Stack: Tauri v2 (Rust) + Svelte 5 + Tailwind CSS + pnpm
 
 킬러 피처:
 - 유튜브 URL → MR 한 방에 (다운로드 + 분리 자동)
 - 영상 파일(MP4/MKV 등) 드래그&드롭 → 오디오 자동 추출 후 분리
-- 스템 믹서: 보컬/드럼/베이스/기타 볼륨 실시간 조절하며 재생
+- 스템 믹서: 보컬/드럼/베이스/기타 볼륨 실시간 조절 + 파형 시각화
 - 키 조절: 반음 단위 ±12 피치 시프트
+- 다중 선택 삭제 및 배치 내보내기
 
-**핵심 원칙: 앱만 실행하면 됨. 별도 설치 없음.**
+**핵심 원칙: 최소 설치로 바로 사용.**
+- ffmpeg/yt-dlp: Tauri sidecar로 앱에 번들 (별도 설치 불필요)
+- Python + demucs: 용량 문제(~2GB)로 번들 불가 → SetupPage에서 설치 안내 + 자동 감지
 
 ## Commands
 
-run: python main.py
-build: build.bat # PyInstaller onefile windowed
-install: pip install -r requirements.txt
+```
+pnpm tauri dev       # 개발 모드 (HMR + Rust 재컴파일)
+pnpm tauri build     # 프로덕션 빌드 → 설치 파일
+pnpm dev             # 프론트엔드만 개발
+pnpm build           # 프론트엔드만 빌드
+pnpm tauri add <p>   # Tauri 플러그인 추가
+```
 
 ## Project Structure
 
-app/
-styles.py # 다크 테마 색상 + QSS
-workers.py # QThread 워커 (Setup, Separation, Ytdlp, VideoExtract, StemPlayer, PitchShift, VersionCheck)
-history.py # 처리 히스토리 JSON 관리
-pages/
-setup_page.py # 자동 패키지 설치/업데이트
-queue_page.py # URL 입력 + 파일 드롭 + 큐
-process_page.py # 분리 진행 상태
-player_page.py # 스템 믹서 + 키 조절
-history_page.py # 처리 이력
-settings_page.py # 버전 현황 + 저장 정책
-widgets/
-drop_zone.py # 드래그&드롭
-url_input.py # 유튜브 URL 입력
-file_card.py # 큐/처리 항목 카드
-stem_mixer.py # 4트랙 볼륨 + 뮤트
-model_selector.py # demucs 모델 드롭다운
-history_card.py # 히스토리 항목
+```
+src/                          # Svelte 프론트엔드
+  App.svelte                  # 루트 + 페이지 라우팅
+  main.ts
+  lib/
+    commands.ts               # Tauri invoke 래퍼
+    stores.ts                 # Svelte stores (상태 관리)
+    types.ts                  # TypeScript 타입 정의
+  pages/
+    SetupPage.svelte
+    QueuePage.svelte
+    ProcessPage.svelte
+    PlayerPage.svelte
+    HistoryPage.svelte
+    SettingsPage.svelte
+  components/
+    DropZone.svelte
+    UrlInput.svelte
+    FileCard.svelte
+    StemMixer.svelte          # Web Audio API 믹서 + wavesurfer.js
+    ModelSelector.svelte
+    HistoryCard.svelte
+    WaveformPlayer.svelte     # 파형 시각화
+src-tauri/                    # Rust 백엔드
+  Cargo.toml
+  tauri.conf.json
+  capabilities/
+    default.json              # 권한 정의
+  src/
+    main.rs
+    lib.rs
+    commands/
+      setup.rs                # 패키지 설치/업데이트
+      youtube.rs              # yt-dlp 호출
+      separate.rs             # demucs 호출
+      video.rs                # ffmpeg 오디오 추출
+      export.rs               # 믹스 내보내기
+    history.rs                # 히스토리 JSON 관리
 docs/
-references/ # 상세 스펙 문서
-01-plan/ ~ 04-report/ # PDCA
+  references/                 # 상세 스펙 문서
+  01-plan/ ~ 04-report/       # PDCA
+```
 
 ## Key Conventions
 
-- PyQt6 enum full path: `Qt.AlignmentFlag.AlignCenter`, `QAbstractItemView.DragDropMode.DropOnly`, `Qt.ItemDataRole.UserRole`, `QSystemTrayIcon.MessageIcon.Information`
-- QThread 워커: signal/slot 통신, UI 스레드에서 직접 처리 금지
-- 다크 테마 색상: BG=#0d0d1a, SURFACE=#16162e, ACCENT=#7c5cfc
-- 파일 타입 아이콘: 🔗 URL / 🎵 오디오 / 🎬 영상
-- 출력 파일명: `{stem}_instrumental.wav`, `{stem}_instrumental_320k.mp3`
-- 기본 출력 폴더: `~/Desktop/MR Extractor/`
+- Svelte 5 runes: `$state`, `$derived`, `$effect` 사용
+- Tailwind CSS: 다크 테마 기본, 커스텀 색상 `--color-*`
+- Tauri IPC: `invoke` (요청-응답), `Channel` (진행률 스트리밍)
+- import: `@tauri-apps/api/core` (invoke), `@tauri-apps/plugin-*` (기능별)
+- 컴포넌트: PascalCase, `.svelte` 파일
+- 타입: `src/lib/types.ts`에 중앙 관리
+
+## Theme Colors
+
+```css
+--bg: #0d0d1a;
+--surface: #16162e;
+--border: #2a2a4e;
+--accent: #7c5cfc;
+--success: #3dd68c;
+--warn: #f0a500;
+--danger: #e05c5c;
+--muted: #8888aa;
+```
+
+## Output Rules
+
+```
+{stem}_instrumental.wav
+{stem}_instrumental_320k.mp3
+기본 출력: ~/Desktop/MR Extractor/
+```
+
+## Audio Architecture
+
+```
+demucs/yt-dlp/ffmpeg → Rust (subprocess) → Channel → Svelte
+Web Audio API: AudioContext → GainNode (볼륨) → BiquadFilter (EQ)
+Tone.js PitchShift: 실시간 피치 조절 (미리듣기)
+ffmpeg rubberband: 피치 시프트 내보내기
+wavesurfer.js: 파형 시각화 + 구간 선택
+```
+
+## CLI Tools (Rust에서 subprocess 호출)
+
+- `python -m demucs` — 음원 분리
+- `yt-dlp` — 유튜브 다운로드 (sidecar 번들)
+- `ffmpeg` / `ffprobe` — 영상→오디오 추출, 포맷 변환, 피치 시프트 내보내기 (sidecar 번들)
 
 ## Version Policy
 
-메이저 버전 고정. 마이너/패치만 자동 허용.
-
 ```
-demucs>=4,<5 | pydub>=0.25,<1 | static-ffmpeg>=2,<3
-sounddevice>=0.4,<1 | librosa>=0.10,<1 | yt-dlp (항상 최신)
+demucs>=4,<5 | yt-dlp (sidecar 번들) | ffmpeg (sidecar 번들)
 ```
 
-yt-dlp만 예외: 유튜브 정책 변경 대응을 위해 버전 제한 없음.
+⚠ demucs는 `torchaudio<2.2` 제약 있음 — Python venv 격리 권장
 
 ## demucs
 
-- `pip install demucs` 그대로 사용 (아카이브된 포크 설치 불필요)
-- 기본 모델: `htdemucs_ft` (SDR 9.20dB, fine-tuned, Bag of 4 모델이라 4배 느림)
+- `pip install demucs` 사용 (별도 포크 불필요)
+- 기본 모델: `htdemucs_ft` (SDR 9.20dB, Bag of 4 모델이라 4배 느림)
 - 결과 경로: `tmp/*/stem/` 패턴 탐색 (모델명 하드코딩 금지)
-- ⚠ demucs는 `torchaudio<2.2` 제약 있음 — PyTorch 2.2+ 환경에서 충돌 가능. venv 격리 권장
 
 ## Do Not
 
-- `pip install --upgrade demucs` 금지 → 반드시 constraint 지정
 - demucs 결과 경로에 모델명 하드코딩 금지
-- tqdm 진행률 `readline()` 금지 → char 단위 읽기
-- librosa pitch_shift `mono=True` 금지 → `mono=False` 스테레오 유지
-- sounddevice 콜백에서 UI 직접 업데이트 금지 → 50ms QTimer 분리. 재생 종료는 `CallbackStop`
+- Tauri 플러그인 사용 시 capabilities 권한 누락 금지
+- Rust `.plugin()` 등록 없이 프론트엔드에서 플러그인 호출 금지
+- `@tauri-apps/api/tauri` 사용 금지 → `@tauri-apps/api/core` (v2)
+- Web Audio AudioContext를 컴포넌트마다 생성 금지 → 싱글턴 관리
 - ffmpeg 진행률 파싱 시 총 재생시간은 ffprobe로 사전 확인 필수
-- librosa sf.write 시 `.T` (transpose) 필수 — `sf.write(out_path, shifted.T, sr)`
-- 영상 파일 처리 후 tmp WAV 삭제 안 하기 금지
 
 ## Page Flow
 
