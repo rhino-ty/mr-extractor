@@ -14,7 +14,8 @@ Stack: Tauri v2 (Rust) + Svelte 5 + Tailwind CSS + pnpm
 
 **핵심 원칙: 최소 설치로 바로 사용.**
 - ffmpeg/yt-dlp: Tauri sidecar로 앱에 번들 (별도 설치 불필요)
-- Python + demucs: 용량 문제(~2GB)로 번들 불가 → SetupPage에서 설치 안내 + 자동 감지
+- Python + demucs: Embedded Python 번들 + 첫 실행 시 demucs 자동 pip install
+- SetupPage: 기술 용어 노출 금지. 사용자는 기다리기만 하면 됨 (클릭 0회)
 
 ## Commands
 
