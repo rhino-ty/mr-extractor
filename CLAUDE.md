@@ -75,7 +75,7 @@ docs/
 ## Key Conventions
 
 - Svelte 5 runes: `$state`, `$derived`, `$effect` 사용
-- Tailwind CSS: 다크 테마 기본, 커스텀 색상 `--color-*`
+- Tailwind CSS: **다크 테마 전용** (라이트 모드 없음), 커스텀 색상 `--color-*`
 - Tauri IPC: `invoke` (요청-응답), `Channel` (진행률 스트리밍)
 - import: `@tauri-apps/api/core` (invoke), `@tauri-apps/plugin-*` (기능별)
 - 컴포넌트: PascalCase, `.svelte` 파일

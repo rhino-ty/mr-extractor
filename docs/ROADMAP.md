@@ -21,7 +21,7 @@
 - [ ] 파형 시각화 (wavesurfer.js)
 - [ ] 구간 반복 재생 A-B Loop (wavesurfer.js regions 플러그인)
 - [ ] 처리 완료 시 시스템 알림
-- [ ] 다크 테마 UI (Tailwind)
+- [ ] 다크 테마 전용 UI (Tailwind, 라이트 모드 없음)
 - [ ] 다중 선택 삭제
 - [ ] 배치 내보내기
 
