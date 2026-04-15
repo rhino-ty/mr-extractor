@@ -14,12 +14,12 @@
 
 | 문서                                              | 내용                                                   |
 | ------------------------------------------------- | ------------------------------------------------------ |
-| [WORKERS.md](references/WORKERS.md)               | QThread 워커 7개 상세 (신호, 진행률 파싱, 코드 스니펫) |
-| [FILE_FORMATS.md](references/FILE_FORMATS.md)     | 지원 포맷, DropZone 확장자 분류, 처리 흐름             |
-| [UI.md](references/UI.md)                         | PlayerPage 레이아웃, UX 퀄리티 가이드, 폰트/간격       |
+| [COMMANDS.md](references/COMMANDS.md)             | Rust 커맨드 (setup, youtube, separate, video, export)  |
+| [FILE_FORMATS.md](references/FILE_FORMATS.md)     | 지원 포맷, DropZone 확장자, 내보내기 포맷              |
+| [UI.md](references/UI.md)                         | PlayerPage, Web Audio, wavesurfer.js, UX 퀄리티 가이드 |
 | [MODEL_SELECTOR.md](references/MODEL_SELECTOR.md) | 모델 드롭다운, 툴팁, [?] 도움말 패널                   |
-| [HISTORY.md](references/HISTORY.md)               | 히스토리 JSON 구조, UI, 뱃지, 삭제 다이얼로그          |
-| [SETTINGS.md](references/SETTINGS.md)             | 설정 페이지 (버전 현황, 저장 정책, 저장 공간, 알림)    |
+| [HISTORY.md](references/HISTORY.md)               | 히스토리 JSON, UI, 뱃지, 다중 선택, 삭제               |
+| [SETTINGS.md](references/SETTINGS.md)             | 설정 (환경 상태, 저장 정책, 저장 공간, 알림)           |
 | [SHORTCUTS.md](references/SHORTCUTS.md)           | 앱 전역 단축키                                         |
 | [UX_BEHAVIORS.md](references/UX_BEHAVIORS.md)     | 앱 종료, 중복 파일 처리, 첫 실행 UX                    |
 
