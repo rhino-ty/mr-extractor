@@ -18,63 +18,69 @@
 
 ## 앱 종료 안전 처리
 
-처리 중 창 닫기(X 버튼) 또는 Alt+F4:
+Tauri `on_window_event` + `CloseRequested`:
 
-```
-┌──────────────────────────────────────┐
-│  ⚠ 처리 중입니다                      │
-│  2개 파일을 처리 중입니다.              │
-│  지금 종료하면 작업이 취소됩니다.        │
-│  [계속 처리]   [취소 후 종료]           │
-└──────────────────────────────────────┘
+```rust
+.on_window_event(|window, event| {
+    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        if is_processing() {
+            api.prevent_close();
+            // 프론트엔드에 확인 다이얼로그 요청
+            window.emit("confirm-close", ()).ok();
+        }
+    }
+})
 ```
 
-```python
-def closeEvent(self, event):
-    if self._is_processing():
-        reply = QMessageBox.question(...)
-        if reply == QMessageBox.StandardButton.Yes:
-            self._cancel_all_workers()
-            event.accept()
-        else:
-            event.ignore()
-    else:
-        event.accept()
+프론트엔드:
+```svelte
+<script>
+import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+
+let showConfirm = $state(false);
+
+$effect(() => {
+    listen('confirm-close', () => { showConfirm = true; });
+});
+
+function confirmClose() {
+    cancelAllTasks();
+    getCurrentWindow().destroy();
+}
+</script>
 ```
 
 ## 중복 파일 처리
 
-같은 파일/URL 큐에 재추가 시:
+같은 파일/URL 큐에 재추가 시 모달:
 
 ```
-┌──────────────────────────────────────────┐
-│  이미 추가된 파일입니다                    │
-│  소란 - 사랑한 마음엔 죄가 없다.mp3        │
-│  ○ 건너뜀 (추가 안 함)     ← 기본          │
-│  ○ 중복 추가 (같은 파일 두 번 처리)        │
-│  □ 앞으로 이 선택 기억하기                 │
-│               [확인]                      │
-└──────────────────────────────────────────┘
+○ 건너뜀 (추가 안 함)     ← 기본
+○ 중복 추가 (같은 파일 두 번 처리)
+□ 앞으로 이 선택 기억하기
 ```
 
 URL 정규화:
-
-```python
-def normalize_url(url):
-    from urllib.parse import urlparse, parse_qs
-    parsed = urlparse(url)
-    if "youtube" in parsed.netloc or "youtu.be" in parsed.netloc:
-        v = parse_qs(parsed.query).get("v", [""])[0]
-        return f"https://www.youtube.com/watch?v={v}"
-    return url
+```typescript
+function normalizeUrl(url: string): string {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes('youtube') || parsed.hostname.includes('youtu.be')) {
+        const v = parsed.searchParams.get('v') || '';
+        return `https://www.youtube.com/watch?v=${v}`;
+    }
+    return url;
+}
 ```
 
 ## 첫 실행 UX
 
 ```
-앱 실행 → 자동 설치/업데이트 → 자동 진입 (클릭 0회)
+앱 실행 → 환경 자동 감지 → 자동 진입 (클릭 0회)
 URL 붙여넣기 → 추가 → 분리 시작 → 스템 믹서로 재생
 ```
+
+미설치 도구 감지 시 SetupPage에서 설치 안내 표시.
 
 ## Related Docs
 
