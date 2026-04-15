@@ -47,8 +47,10 @@
 
 ## v2+ — 백로그 (Later)
 
-- [ ] GPU 가속 (CUDA) 지원
+- [ ] GPU 가속 자동 감지 + 설정 UI (CUDA/MPS/CPU 선택, segment 조절)
 - [ ] 배치 처리 최적화 (동시 처리 수 조절)
+- [ ] Python API 방식 전환 (CLI 서브프로세스 → `demucs.api.Separator`)
+- [ ] 노래방 모드 (`--two-stems=vocals`)
 - [ ] 커스텀 모델 지원
 - [ ] 자동 업데이트 (앱 자체)
 - [ ] macOS 지원
