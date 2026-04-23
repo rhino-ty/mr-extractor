@@ -9,7 +9,7 @@
 > **Status**: Draft — Option C (Pragmatic) 제안, 사용자 확정 필요 (§2.0)
 > **Planning Doc**: [setup-page.plan.md](../../01-plan/features/setup-page.plan.md) (v0.6)
 
-## ab
+---
 
 ## Context Anchor
 
