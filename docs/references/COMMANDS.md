@@ -45,9 +45,13 @@ async fn check_environment(app: tauri::AppHandle) -> Result<EnvStatus, String> {
     // 2. yt-dlp sidecar → "유튜브 다운로더"
     // 3. embedded python → "실행 환경"
     // 4. demucs pip check → "음원 분리 엔진"
+    //    → 파일 존재 체크로 부족. `python -m demucs --help` 실행 + exit code 확인 (health check)
     // 5. htdemucs_ft 모델 캐시 → "AI 모델"
+    //    → %APPDATA%/com.rhinoty.mr-extractor/torch-cache/hub/checkpoints/htdemucs_ft-*.th 존재 확인
 }
 ```
+
+> **2026-04-24 수정**: demucs 항목 health check 강화 — 파일 존재만으론 AV 격리/부분 설치 감지 불가. `python -m demucs --help` 실제 실행으로 import 성공까지 검증. 모델 캐시 경로는 `TORCH_HOME` 리다이렉트 기반 (`%APPDATA%/com.rhinoty.mr-extractor/torch-cache/`). setup-page Plan v0.4 근거.
 
 ### 자동 설치
 
@@ -66,8 +70,18 @@ async fn install_dependencies(
 
 #[derive(Clone, serde::Serialize)]
 struct InstallProgress {
-    step: String,       // 사용자에게 보이는 현재 단계
-    percent: u32,       // 0~100
+    step: String,           // 사용자에게 보이는 현재 단계 (한국어)
+    percent: u32,           // 0~100 전체 진행률
+    phase: InstallPhase,    // 내부 상태 구분 (로깅/디버깅용)
+}
+
+#[derive(Clone, serde::Serialize)]
+enum InstallPhase {
+    ExtractPython,      // Embedded Python 압축 해제
+    CreateVenv,         // venv 생성
+    InstallTorch,       // pip install torch
+    InstallDemucs,      // pip install demucs
+    DownloadModel,      // htdemucs_ft 모델 다운로드
 }
 ```
 
@@ -87,9 +101,13 @@ struct InstallProgress {
 ```rust
 #[tauri::command]
 async fn check_internet() -> Result<bool, String> {
-    // https://pypi.org 또는 https://dl.fbaipublicfiles.com 에 HEAD 요청
+    // 1차: HEAD https://pypi.org (타임아웃 3초)
+    // 2차 fallback: HEAD https://dl.fbaipublicfiles.com (타임아웃 3초)
+    // 둘 다 실패 → false
 }
 ```
+
+> **2026-04-24 명시화**: 호출 위치는 **setup-page에서만**. 다른 페이지(queue/process/player/export)는 오프라인 완전 동작해야 하므로 `check_internet` 호출 금지. 유튜브 다운로드는 yt-dlp 자체 네트워크 에러로 처리. — setup-page Plan v0.4 확정.
 
 ## youtube.rs — yt-dlp 다운로드
 

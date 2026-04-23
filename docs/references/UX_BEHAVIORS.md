@@ -33,6 +33,7 @@ Tauri `on_window_event` + `CloseRequested`:
 ```
 
 프론트엔드:
+
 ```svelte
 <script>
 import { listen } from '@tauri-apps/api/event';
@@ -62,14 +63,15 @@ function confirmClose() {
 ```
 
 URL 정규화:
+
 ```typescript
 function normalizeUrl(url: string): string {
-    const parsed = new URL(url);
-    if (parsed.hostname.includes('youtube') || parsed.hostname.includes('youtu.be')) {
-        const v = parsed.searchParams.get('v') || '';
-        return `https://www.youtube.com/watch?v=${v}`;
-    }
-    return url;
+  const parsed = new URL(url);
+  if (parsed.hostname.includes('youtube') || parsed.hostname.includes('youtu.be')) {
+    const v = parsed.searchParams.get('v') || '';
+    return `https://www.youtube.com/watch?v=${v}`;
+  }
+  return url;
 }
 ```
 
@@ -93,7 +95,8 @@ function normalizeUrl(url: string): string {
 
 ### SetupPage 화면 상태
 
-**설치 중:**
+**설치 중:** *(2026-04-24 수정 — 실측/예상 용량 동시 노출, setup-page Plan FR-13)*
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │              🎵 MR Extractor                         │
@@ -107,6 +110,7 @@ function normalizeUrl(url: string): string {
 │  ○  AI 모델                                          │
 │                                                      │
 │  ━━━━━━━━━━━━━━━━●━━━━━━━━━  67%                    │
+│  사용 중인 공간: 1.7 GB  /  예상: 2.4 GB              │
 │                                                      │
 │  처음 실행 시 한 번만 설치됩니다.                      │
 │  인터넷 연결이 필요해요. (약 2~3분)                    │
@@ -114,7 +118,10 @@ function normalizeUrl(url: string): string {
 └─────────────────────────────────────────────────────┘
 ```
 
-**이미 설치됨 (2회차 이후):**
+> **표시 수치는 모두 동적** (Plan FR-14): "1.7 GB"는 `common::dir_size(%APPDATA%)` 실측, "2.4 GB"는 `estimate_install_size()` (로컬 파일 metadata + pypi wheel probing + 모델 HEAD Content-Length 합산) 결과. PyTorch 버전 올라가거나 모델 크기 바뀌면 자동 반영. 하드코딩 금지.
+
+**이미 설치됨 (2회차 이후):** *(2026-04-24 수정 — 실측 사용량 표시 추가)*
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │              🎵 MR Extractor                         │
@@ -127,11 +134,15 @@ function normalizeUrl(url: string): string {
 │  ✅ 음원 분리 엔진                                    │
 │  ✅ AI 모델                                          │
 │                                                      │
+│  📊 사용 중인 공간: 2.4 GB                            │
+│  (추가 모델은 사용 시 자동 다운로드)                   │
+│                                                      │
 │              (1초 후 자동 진입)                        │
 └─────────────────────────────────────────────────────┘
 ```
 
 **설치 실패:**
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │              ⚠ 설치 중 문제가 발생했어요               │
@@ -154,6 +165,7 @@ function normalizeUrl(url: string): string {
 ```
 
 **인터넷 없음:**
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │              📡 인터넷 연결이 필요해요                 │
@@ -166,6 +178,39 @@ function normalizeUrl(url: string): string {
 └─────────────────────────────────────────────────────┘
 ```
 
+**디스크 공간 부족:** *(2026-04-24 신규 추가 → 추가 수정: breakdown + 동적 수치, setup-page Plan FR-11/13/14)*
+
+```
+┌─────────────────────────────────────────────────────┐
+│              💾 저장 공간이 부족해요                   │
+│                                                      │
+│  설치 필요:       2.5 GB                              │
+│    ├ 음원 분리 엔진      ~500 MB                      │
+│    └ AI 모델            ~1.3 GB                       │
+│  설치 중 임시:     0.5 GB                             │
+│  권장 여유:        1.0 GB                             │
+│  ─────────────────────                                │
+│  총 필요 공간:     4.0 GB                             │
+│  현재 공간:        1.2 GB  ❌                          │
+│                                                      │
+│  불필요한 파일을 정리한 후 다시 시도해주세요.          │
+│                                                      │
+│              [🔄 다시 확인]                           │
+└─────────────────────────────────────────────────────┘
+```
+
+> **모든 수치는 동적 (Plan FR-14)**:
+> - "음원 분리 엔진 ~500 MB" = `probe_pypi_wheel_size("torch") + probe_pypi_wheel_size("demucs")`
+> - "AI 모델 ~1.3 GB" = `probe_url_size(HTDEMUCS_FT_URLS)` 합산
+> - "설치 중 임시 0.5 GB" = pip staging 경험칙 (이 값만 유일하게 상수 허용 가능)
+> - "권장 여유" = `max(0.5 GB, install_total × 0.2)`
+> - "총 필요 공간" = 설치 + 임시 + 여유
+> - "현재 공간" = `sysinfo::System::new().disks()`에서 해당 드라이브 free bytes
+>
+> **하드코딩 금지 원칙**: 위 수치는 예시. 실제 UI는 Rust 계산 결과를 string format만. PyTorch 2.1→2.2 업데이트되면 숫자 자동 갱신.
+
+> **추가 이유 (Critical)**: 이전 스펙은 4가지 상태(설치중/완료/실패/인터넷없음)만 정의. 디스크 부족 환경에서 설치 시작 시 pip install torch 도중 `OSError: No space left on device`로 중단되고 부분 설치 venv가 남아 다음 실행 시 health check 실패 → 무한 루프. 설치 **시작 전** 공간 확인이 필수.
+
 ### UX 규칙
 
 - 기술 용어 노출 금지 (Python, pip, PyTorch, demucs 등)
@@ -175,9 +220,21 @@ function normalizeUrl(url: string): string {
 - [📋 오류 복사] → 클립보드에 복사 → "복사되었습니다" 토스트
 - 2회차 이후: 모두 ✅ → 1초 후 자동 진입 (빠른 사용자 경험)
 
+### 화면 상태 종합 (6가지) — _2026-04-24 정리_
+
+| #   | 상태        | 트리거                                 | 액션                                              |
+| --- | ----------- | -------------------------------------- | ------------------------------------------------- |
+| ①   | detecting   | 앱 실행 직후                           | `check_environment` 호출, 0.5초 내 다음 상태로    |
+| ②   | installing  | 누락 항목 존재 & 인터넷 OK & 디스크 OK | `install_dependencies` 자동 호출, 진행률 스트리밍 |
+| ③   | ready       | 모든 항목 ready (health check 통과)    | 1초 후 QueuePage 자동 전환                        |
+| ④   | error       | 설치 실패                              | 재시도 버튼, 오류 상세 토글, 클립보드 복사        |
+| ⑤   | no-internet | `check_internet` 실패                  | 안내 화면 + [🔄 다시 확인]                        |
+| ⑥   | disk-full   | 디스크 < 3GB                           | 안내 화면 + 필요/현재 용량 + [🔄 다시 확인]       |
+
 ### 업데이트 알림 (2회차 이후, 비강제)
 
 설정 페이지에서만 표시. SetupPage에서 강제 업데이트 안 함.
+
 ```
 트레이 알림: "더 나은 음원 분리를 위한 업데이트가 있어요."
 → 설정 > 업데이트에서 선택적 실행

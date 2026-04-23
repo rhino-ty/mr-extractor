@@ -10,8 +10,10 @@
 
 ## Current Rules
 
-- 저장: Tauri Store 또는 Rust 측 JSON (`%APPDATA%/com.mr-extractor.app/history.json`)
+- 저장: Tauri Store 또는 Rust 측 JSON (`%APPDATA%/com.rhinoty.mr-extractor/history.json`)
 - 페이지 열릴 때 Rust에서 파일 존재 확인 (비동기)
+
+> **2026-04-24 수정**: Tauri bundle identifier가 `com.rhinoty.mr-extractor`로 확정됨 (`tauri.conf.json`). 이전 문서의 `com.mr-extractor.app`는 오타. `appDataDir()` API는 identifier 기반 경로를 반환하므로 전체 프로젝트에서 이 경로 준수 필요. — setup-page Plan v0.4 교차 검증에서 발견.
 
 ---
 
