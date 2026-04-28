@@ -354,12 +354,20 @@
           처음 사용하시는 경우 앱 구성 요소를 다운로드해야 해요.<br />
           Wi-Fi 또는 유선 연결을 확인해주세요.
         </p>
-        <button
-          class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
-          onclick={detect}
-        >
-          🔄 다시 확인
-        </button>
+        <div class="flex gap-2">
+          <button
+            class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-semibold text-muted hover:bg-bg"
+            onclick={declineInstall}
+          >
+            ✕ 닫기
+          </button>
+          <button
+            class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+            onclick={detect}
+          >
+            🔄 다시 확인
+          </button>
+        </div>
       </div>
     {:else if pageState.kind === "disk-full"}
       <div class="flex flex-col gap-4 py-8" in:fade={{ duration: 200 }}>
@@ -393,12 +401,20 @@
             <span>{formatSize(pageState.current)} ❌</span>
           </div>
         </div>
-        <button
-          class="self-center rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
-          onclick={detect}
-        >
-          🔄 다시 확인
-        </button>
+        <div class="flex justify-center gap-2">
+          <button
+            class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-semibold text-muted hover:bg-bg"
+            onclick={declineInstall}
+          >
+            ✕ 닫기
+          </button>
+          <button
+            class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+            onclick={detect}
+          >
+            🔄 다시 확인
+          </button>
+        </div>
       </div>
     {/if}
   </div>
