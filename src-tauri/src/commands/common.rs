@@ -19,6 +19,44 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// § 0. Dev Logging — debug 빌드에서만 활성화
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// 진단용 파일 로그 + eprintln stderr. release 빌드에선 no-op.
+// 로그 위치: %APPDATA%/com.rhinoty.mr-extractor/setup.log
+// 사용: common::dev_log(app, "메시지");
+//
+// 운영 노출: read_setup_log Tauri command + 에러 화면에서 [📋 로그 보기] 버튼.
+
+#[cfg(debug_assertions)]
+pub fn dev_log(app: &AppHandle, msg: &str) {
+    eprintln!("[setup] {}", msg);
+    let _ = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let dir = app_data_dir(app).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("setup.log");
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&path)?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        writeln!(f, "[{}] {}", now, msg)
+    })();
+}
+
+#[cfg(not(debug_assertions))]
+pub fn dev_log(_app: &AppHandle, _msg: &str) {}
+
+/// setup.log 경로 (없을 수도 있음).
+pub fn setup_log_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("setup.log"))
+}
+
 // ─── 상수 (Plan NFR: 크기 하드코딩 금지, CONSERVATIVE_ESTIMATE_MB 1개만 허용) ──────
 
 /// Probing 실패 시 fallback 예상치. 허용되는 유일한 크기 상수.

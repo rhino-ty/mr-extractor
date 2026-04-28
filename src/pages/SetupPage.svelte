@@ -14,7 +14,10 @@
     checkDiskSpace,
     checkEnvironment,
     checkInternet,
+    clearSetupLog,
+    getSetupLogPath,
     installDependencies,
+    readSetupLog,
   } from "$lib/commands";
   import { translateToFriendlyMessage } from "$lib/errorMessages";
   import type { EnvItem, EnvStatus, InstallProgress, SetupPageState } from "$lib/types";
@@ -23,6 +26,53 @@
   let pageState: SetupPageState = $state({ kind: "detecting" });
   let detailOpen = $state(false);
   let canceling = $state(false);
+  let logOpen = $state(false);
+  let logContent = $state("");
+  let logPath = $state("");
+  let logLoading = $state(false);
+
+  function statusToMark(s: EnvItem["status"]): string {
+    return { ready: "✅", installing: "⏳", missing: "○", error: "❌" }[s];
+  }
+
+  function formatHealthCheckDetail(items: EnvItem[]): string {
+    const lines = items.map(
+      (it) => `  ${statusToMark(it.status)} ${it.label}: ${it.status}${it.version ? ` (v${it.version})` : ""}`,
+    );
+    return ["post-install health check failed:", ...lines].join("\n");
+  }
+
+  async function openLog() {
+    logLoading = true;
+    logOpen = true;
+    try {
+      [logContent, logPath] = await Promise.all([readSetupLog(), getSetupLogPath()]);
+      if (!logContent.trim()) {
+        logContent = "(로그가 비어있어요. debug 빌드에서만 기록됩니다.)";
+      }
+    } catch (e) {
+      logContent = `로그 로드 실패: ${e}`;
+    } finally {
+      logLoading = false;
+    }
+  }
+
+  async function copyLog() {
+    try {
+      await navigator.clipboard.writeText(logContent);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function clearLog() {
+    try {
+      await clearSetupLog();
+      logContent = "";
+    } catch {
+      // ignore
+    }
+  }
 
   // Design §5.1 — installing 진입 시 "현재 진행 중인 항목"을 ⏳로 표시.
   // Plan FR-06: 라벨은 한국어 별칭만 사용.
@@ -141,7 +191,7 @@
           kind: "error",
           items: reCheck.items,
           message: "설치는 끝났지만 일부 항목을 확인하지 못했어요. 다시 시도해주세요.",
-          detail: "post-install health check failed",
+          detail: formatHealthCheckDetail(reCheck.items),
         };
       }
     } catch (e) {
@@ -191,7 +241,46 @@
   }
 </script>
 
-<div class="flex h-full items-center justify-center p-6">
+<div class="relative flex h-full items-center justify-center p-6">
+  {#if logOpen}
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div class="flex h-full max-h-[80vh] w-full max-w-[800px] flex-col gap-3 rounded-xl border border-border bg-surface p-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold">📜 진단 로그</h2>
+          <button class="text-xs text-muted hover:text-white" onclick={() => (logOpen = false)}>✕ 닫기</button>
+        </div>
+        {#if logPath}
+          <p class="break-all text-[11px] text-muted">파일: {logPath}</p>
+        {/if}
+        <pre
+          class="flex-1 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-bg p-3 font-mono text-[11px] leading-relaxed text-muted">{logLoading ? "로딩 중..." : logContent}</pre>
+        <div class="flex gap-2">
+          <button
+            class="flex-1 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs hover:bg-surface"
+            onclick={openLog}
+          >
+            🔄 새로고침
+          </button>
+          <button
+            class="flex-1 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs hover:bg-surface"
+            onclick={copyLog}
+          >
+            📋 복사
+          </button>
+          <button
+            class="flex-1 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs hover:bg-surface"
+            onclick={clearLog}
+          >
+            🗑 비우기
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
   <div class="w-full max-w-[600px]">
     {#if pageState.kind === "detecting"}
       <div class="flex flex-col items-center gap-4 py-12" in:fade={{ duration: 200 }}>
@@ -331,12 +420,17 @@
           {#if detailOpen}
             <pre
               class="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-bg p-3 font-mono text-xs text-muted">{pageState.detail}</pre>
-            <button
-              class="self-start text-xs text-accent hover:underline"
-              onclick={() => copyDetail(pageState.kind === "error" ? pageState.detail : "")}
-            >
-              📋 오류 복사
-            </button>
+            <div class="flex gap-2">
+              <button
+                class="text-xs text-accent hover:underline"
+                onclick={() => copyDetail(pageState.kind === "error" ? pageState.detail : "")}
+              >
+                📋 오류 복사
+              </button>
+              <button class="text-xs text-accent hover:underline" onclick={openLog}>
+                📜 진단 로그 보기
+              </button>
+            </div>
           {/if}
         </div>
         <button

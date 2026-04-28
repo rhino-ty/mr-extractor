@@ -29,6 +29,20 @@ export async function cancelInstall(): Promise<void> {
   return invoke<void>("cancel_install");
 }
 
+// ─── Dev 진단용 (debug 빌드에서만 의미 있는 데이터, release는 빈 문자열) ──────
+
+export async function readSetupLog(): Promise<string> {
+  return invoke<string>("read_setup_log");
+}
+
+export async function clearSetupLog(): Promise<void> {
+  return invoke<void>("clear_setup_log");
+}
+
+export async function getSetupLogPath(): Promise<string> {
+  return invoke<string>("setup_log_path");
+}
+
 // ─── 후속 피처 placeholder (Phase 1 scope 외, 시그니처 유지) ─────────────────
 
 export async function downloadYoutube(

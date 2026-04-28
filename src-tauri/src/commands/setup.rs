@@ -141,6 +141,8 @@ pub struct DiskCheck {
 
 #[tauri::command]
 pub async fn check_environment(app: AppHandle) -> Result<EnvStatus, String> {
+    common::dev_log(&app, "check_environment: start");
+
     // 5개 항목을 Design §4.2 순서 그대로 (COMMANDS.md 라벨 매핑 준수)
     let ffmpeg = probe_sidecar(&app, "ffmpeg", "오디오 변환 도구").await;
     let ytdlp = probe_sidecar(&app, "yt-dlp", "유튜브 다운로더").await;
@@ -151,6 +153,19 @@ pub async fn check_environment(app: AppHandle) -> Result<EnvStatus, String> {
     let items = vec![ffmpeg, ytdlp, python, demucs, model];
     let all_ready = items.iter().all(|i| matches!(i.status, EnvItemStatus::Ready));
 
+    common::dev_log(
+        &app,
+        &format!(
+            "check_environment: result allReady={}, items=[{}]",
+            all_ready,
+            items
+                .iter()
+                .map(|i| format!("{}:{:?}", i.label, status_str(&i.status)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    );
+
     let (estimate_mb, probe_ok) = common::estimate_install_size(&app).await;
 
     Ok(EnvStatus {
@@ -159,6 +174,15 @@ pub async fn check_environment(app: AppHandle) -> Result<EnvStatus, String> {
         install_size_estimate_mb: estimate_mb,
         size_probe_succeeded: probe_ok,
     })
+}
+
+fn status_str(s: &EnvItemStatus) -> &'static str {
+    match s {
+        EnvItemStatus::Ready => "ready",
+        EnvItemStatus::Missing => "missing",
+        EnvItemStatus::Installing => "installing",
+        EnvItemStatus::Error => "error",
+    }
 }
 
 // ─────────────────────────────────────────────
@@ -172,37 +196,59 @@ pub async fn check_environment(app: AppHandle) -> Result<EnvStatus, String> {
 /// 바이너리는 첫 실행 시 AV 스캔이 5~30초 걸릴 수 있어 타임아웃을 30s로 둠.
 /// 두 번째 이후 실행은 즉시 응답 (OS 캐시).
 async fn probe_sidecar(app: &AppHandle, name: &str, label: &str) -> EnvItem {
+    let started = std::time::Instant::now();
     let Ok(cmd) = app.shell().sidecar(name) else {
-        eprintln!("[probe_sidecar] {} sidecar resolve 실패 (capabilities 또는 externalBin 누락?)", name);
+        common::dev_log(
+            app,
+            &format!("probe_sidecar({}): sidecar resolve 실패 (capabilities/externalBin 누락?)", name),
+        );
         return missing(label);
     };
     let run = tokio_timeout(Duration::from_secs(30), cmd.args(["--version"]).output()).await;
+    let elapsed_ms = started.elapsed().as_millis();
 
     match run {
         Ok(Ok(output)) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
             let version = parse_version(&stdout).or_else(|| parse_version(&stderr));
+            common::dev_log(
+                app,
+                &format!(
+                    "probe_sidecar({}): ready in {}ms, version={:?}",
+                    name, elapsed_ms, version
+                ),
+            );
             ready(label, version)
         }
         Ok(Ok(output)) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!(
-                "[probe_sidecar] {} non-zero exit (status={:?}): {}",
-                name,
-                output.status.code(),
-                stderr.lines().next().unwrap_or("")
+            common::dev_log(
+                app,
+                &format!(
+                    "probe_sidecar({}): non-zero exit (status={:?}, {}ms): {}",
+                    name,
+                    output.status.code(),
+                    elapsed_ms,
+                    stderr.lines().next().unwrap_or("")
+                ),
             );
             missing(label)
         }
         Ok(Err(e)) => {
-            eprintln!("[probe_sidecar] {} spawn 실패: {}", name, e);
+            common::dev_log(
+                app,
+                &format!("probe_sidecar({}): spawn 실패: {}", name, e),
+            );
             missing(label)
         }
         Err(_) => {
-            eprintln!(
-                "[probe_sidecar] {} 30s 타임아웃 — AV 첫 스캔 또는 락업 가능성",
-                name
+            common::dev_log(
+                app,
+                &format!(
+                    "probe_sidecar({}): 30s 타임아웃 — AV 첫 스캔 또는 락업 가능성",
+                    name
+                ),
             );
             missing(label)
         }
@@ -214,10 +260,15 @@ async fn probe_sidecar(app: &AppHandle, name: &str, label: &str) -> EnvItem {
 async fn probe_python(app: &AppHandle, label: &str) -> EnvItem {
     // venv가 우선. 없으면 embedded (번들된) python fallback.
     let Ok(venv_py) = common::venv_python_path(app) else {
+        common::dev_log(app, "probe_python: venv_python_path resolve 실패");
         return missing(label);
     };
 
     if !venv_py.exists() {
+        common::dev_log(
+            app,
+            &format!("probe_python: venv python 없음 ({})", venv_py.display()),
+        );
         return missing(label);
     }
 
@@ -231,15 +282,36 @@ async fn probe_python(app: &AppHandle, label: &str) -> EnvItem {
         Ok(Ok(output)) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            // "Python 3.11.9" 형태
             let version = parse_version(&stdout).or_else(|| parse_version(&stderr));
+            common::dev_log(
+                app,
+                &format!("probe_python: ready, version={:?}", version),
+            );
             ready(label, version)
         }
-        Err(_) => {
-            eprintln!("[probe_python] {} 15s 타임아웃", venv_py.display());
+        Ok(Ok(output)) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            common::dev_log(
+                app,
+                &format!(
+                    "probe_python: non-zero exit ({:?}): {}",
+                    output.status.code(),
+                    stderr.lines().next().unwrap_or("")
+                ),
+            );
             missing(label)
         }
-        _ => missing(label),
+        Ok(Err(e)) => {
+            common::dev_log(app, &format!("probe_python: spawn 실패: {}", e));
+            missing(label)
+        }
+        Err(_) => {
+            common::dev_log(
+                app,
+                &format!("probe_python: 15s 타임아웃 ({})", venv_py.display()),
+            );
+            missing(label)
+        }
     }
 }
 
@@ -249,18 +321,43 @@ async fn probe_demucs(app: &AppHandle, label: &str) -> EnvItem {
         return missing(label);
     };
     if !venv_py.exists() {
+        common::dev_log(app, "probe_demucs: venv python 없음");
         return missing(label);
     }
 
     let run = tokio_timeout(
         Duration::from_secs(15),
-        TokioCommand::new(&venv_py).args(["-m", "demucs", "--help"]).output(),
+        TokioCommand::new(&venv_py)
+            .args(["-m", "demucs", "--help"])
+            .output(),
     )
     .await;
 
     match run {
-        Ok(Ok(output)) if output.status.success() => ready(label, None),
-        _ => missing(label),
+        Ok(Ok(output)) if output.status.success() => {
+            common::dev_log(app, "probe_demucs: ready");
+            ready(label, None)
+        }
+        Ok(Ok(output)) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            common::dev_log(
+                app,
+                &format!(
+                    "probe_demucs: non-zero exit ({:?}): {}",
+                    output.status.code(),
+                    stderr.lines().take(3).collect::<Vec<_>>().join(" | ")
+                ),
+            );
+            missing(label)
+        }
+        Ok(Err(e)) => {
+            common::dev_log(app, &format!("probe_demucs: spawn 실패: {}", e));
+            missing(label)
+        }
+        Err(_) => {
+            common::dev_log(app, "probe_demucs: 15s 타임아웃");
+            missing(label)
+        }
     }
 }
 
@@ -268,23 +365,46 @@ async fn probe_demucs(app: &AppHandle, label: &str) -> EnvItem {
 /// Phase 1에선 파일 존재 감지만. 무결성(해시)은 Phase 2 보강.
 async fn probe_model(app: &AppHandle, label: &str) -> EnvItem {
     let Ok(dir) = common::torch_checkpoints_dir(app) else {
+        common::dev_log(app, "probe_model: torch_checkpoints_dir resolve 실패");
         return missing(label);
     };
     if !dir.exists() {
+        common::dev_log(
+            app,
+            &format!("probe_model: 디렉토리 없음 ({})", dir.display()),
+        );
         return missing(label);
     }
 
     let Ok(entries) = std::fs::read_dir(&dir) else {
+        common::dev_log(
+            app,
+            &format!("probe_model: read_dir 실패 ({})", dir.display()),
+        );
         return missing(label);
     };
 
     let mut count = 0u32;
+    let mut names: Vec<String> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if is_model_file(&path) {
             count += 1;
+            if let Some(n) = path.file_name().and_then(|n| n.to_str()) {
+                names.push(n.to_string());
+            }
         }
     }
+
+    common::dev_log(
+        app,
+        &format!(
+            "probe_model: count={} (need >=4), files=[{}], dir={}",
+            count,
+            names.join(", "),
+            dir.display()
+        ),
+    );
 
     // htdemucs_ft = Bag of 4
     if count >= 4 {
@@ -359,6 +479,7 @@ async fn install_inner(
     on_progress: &Channel<InstallProgress>,
     handle: &State<'_, InstallHandle>,
 ) -> Result<(), String> {
+    common::dev_log(app, "install_dependencies: start");
     let app_data = common::app_data_dir(app)?;
     tokio::fs::create_dir_all(&app_data)
         .await
@@ -446,6 +567,7 @@ async fn install_inner(
 
     // 완료 마커 + 100% emit
     write_setup_marker(app).await?;
+    common::dev_log(app, "install_dependencies: done (100%)");
     emit_progress(
         on_progress,
         &app_data,
@@ -545,6 +667,7 @@ async fn pip_install(
     percent_max: u32,
     estimated_final_mb: u32,
 ) -> Result<(), String> {
+    common::dev_log(app, &format!("pip_install({}): start", pkg));
     let venv_py = common::venv_python_path(app)?;
     let env = common::python_env_vars(app)?;
     let app_data = common::app_data_dir(app)?;
@@ -634,6 +757,14 @@ async fn pip_install(
 
     if !status.success() {
         let snippet = stderr_tail.trim();
+        common::dev_log(
+            app,
+            &format!(
+                "pip_install({}): exit non-zero. stderr tail: {}",
+                pkg,
+                snippet.lines().rev().take(5).collect::<Vec<_>>().join(" | ")
+            ),
+        );
         return Err(format!(
             "패키지 설치 실패 ({}). 상세: {}",
             pkg,
@@ -643,6 +774,10 @@ async fn pip_install(
 
     // 완료 직후 실측 emit
     let current_mb = (common::dir_size(&app_data) / 1024 / 1024) as u32;
+    common::dev_log(
+        app,
+        &format!("pip_install({}): done, dir_size={}MB", pkg, current_mb),
+    );
     on_progress
         .send(InstallProgress {
             step: step.into(),
@@ -748,10 +883,53 @@ async fn download_model(
 
     if !status.success() {
         let snippet = stderr_tail.trim();
+        common::dev_log(
+            app,
+            &format!(
+                "download_model: exit non-zero. stderr tail: {}",
+                snippet.lines().rev().take(5).collect::<Vec<_>>().join(" | ")
+            ),
+        );
         return Err(format!(
             "AI 모델 다운로드 실패. {}",
             if snippet.is_empty() { "" } else { snippet }
         ));
+    }
+
+    common::dev_log(
+        app,
+        &format!(
+            "download_model: exit 0. final dir_size={}MB. checking torch-cache files...",
+            common::dir_size(&app_data) / 1024 / 1024
+        ),
+    );
+
+    // demucs 실제 다운로드 위치 진단: torch-cache/hub/checkpoints/ 내용 로그
+    if let Ok(checkpoints) = common::torch_checkpoints_dir(app) {
+        if checkpoints.exists() {
+            if let Ok(entries) = std::fs::read_dir(&checkpoints) {
+                let names: Vec<String> = entries
+                    .flatten()
+                    .filter_map(|e| e.file_name().to_str().map(String::from))
+                    .collect();
+                common::dev_log(
+                    app,
+                    &format!(
+                        "download_model: checkpoints/ files=[{}], path={}",
+                        names.join(", "),
+                        checkpoints.display()
+                    ),
+                );
+            }
+        } else {
+            common::dev_log(
+                app,
+                &format!(
+                    "download_model: checkpoints dir 없음 ({}). TORCH_HOME 미적용 가능성!",
+                    checkpoints.display()
+                ),
+            );
+        }
     }
 
     // SC-13: 4개 .th 파일 검증. demucs 캐시 디렉터리는 환경마다 다를 수 있으므로
@@ -922,4 +1100,40 @@ fn kill_process_tree(pid: u32) -> Result<(), String> {
         .args(["-TERM", &pid.to_string()])
         .output();
     Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Dev Logging API — debug 빌드 진단용. release에선 빈 결과/no-op.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// `%APPDATA%/com.rhinoty.mr-extractor/setup.log` 내용을 반환.
+/// 파일 없거나 release 빌드면 빈 문자열.
+#[tauri::command]
+pub async fn read_setup_log(app: AppHandle) -> Result<String, String> {
+    let path = common::setup_log_path(&app)?;
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| format!("로그 파일 읽기 실패: {}", e))
+}
+
+/// 로그 파일 비우기 (재시도 시 깨끗한 상태로 시작).
+#[tauri::command]
+pub async fn clear_setup_log(app: AppHandle) -> Result<(), String> {
+    let path = common::setup_log_path(&app)?;
+    if path.exists() {
+        tokio::fs::remove_file(&path)
+            .await
+            .map_err(|e| format!("로그 파일 삭제 실패: {}", e))?;
+    }
+    common::dev_log(&app, "─── log cleared ───");
+    Ok(())
+}
+
+/// 로그 파일 경로 반환 (외부 에디터로 열기 안내용).
+#[tauri::command]
+pub fn setup_log_path(app: AppHandle) -> Result<String, String> {
+    Ok(common::setup_log_path(&app)?.to_string_lossy().to_string())
 }
