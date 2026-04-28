@@ -1,0 +1,367 @@
+// Design Ref: §2.2, §9, §11.3 — Foundation layer. 후속 피처 (separate/video/youtube/export) 가 공유.
+// Plan SC-13 경계: setup-page는 기본 모델만 보장, 추가 모델은 common::probe_url_size 재사용하는 ModelSelector 책임.
+//
+// 섹션:
+//   § 1. Paths      — sidecar / app-data / venv / torch-cache / setup-marker
+//   § 2. Probing    — pypi wheel size / HEAD content-length
+//   § 3. Disk       — dir_size / check_disk_space / estimate_install_size
+//   § 4. Subprocess — python subprocess 환경변수 주입
+//
+// 의존 역전 (Design §9.2): common은 AppHandle + std/tokio/reqwest/sysinfo 만 의존. 다른 commands::* import 금지.
+//
+// Phase 1에서 setup.rs가 미사용하는 API는 §11.3 Interface Contract에 명시된 Phase 2/3 export.
+// 후속 피처(ModelSelector, separate.rs)가 재사용할 foundation이라 dead_code 허용.
+#![allow(dead_code)]
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde::Serialize;
+use tauri::{AppHandle, Manager};
+
+// ─── 상수 (Plan NFR: 크기 하드코딩 금지, CONSERVATIVE_ESTIMATE_MB 1개만 허용) ──────
+
+/// Probing 실패 시 fallback 예상치. 허용되는 유일한 크기 상수.
+/// torch(~2GB) + demucs(~small) + htdemucs_ft Bag-of-4(~1.3GB) ≈ 3.3GB.
+pub const CONSERVATIVE_ESTIMATE_MB: u64 = 3500;
+
+/// HTTP probing 타임아웃. Plan §8.2 Convention.
+pub const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Bundle identifier (tauri.conf.json과 일치).
+pub const APP_ID: &str = "com.rhinoty.mr-extractor";
+
+/// htdemucs_ft Bag-of-4 체크포인트 URL 목록.
+/// Phase 1에서는 비어 있음 — model probing은 Phase 2에서 보강.
+/// Plan SC-12: 비어있음 → probing 실패로 간주 → CONSERVATIVE fallback 동작 확인 경로.
+pub const HTDEMUCS_FT_MODEL_URLS: &[&str] = &[];
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// § 1. Paths
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// %APPDATA%/com.rhinoty.mr-extractor/ — 런타임 사용자 쓰기 가능 영역.
+/// Plan §10.3 Decision B: venv/모델/마커 파일 위치.
+pub fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path().app_data_dir().map_err(|e| e.to_string())
+}
+
+/// %APPDATA%/com.rhinoty.mr-extractor/venv/
+pub fn venv_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("venv"))
+}
+
+/// Plan SC-10: venv/Scripts/python.exe — health check 대상 실행 파일.
+pub fn venv_python_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let base = venv_dir(app)?;
+    #[cfg(windows)]
+    let p = base.join("Scripts").join("python.exe");
+    #[cfg(not(windows))]
+    let p = base.join("bin").join("python");
+    Ok(p)
+}
+
+/// %APPDATA%/com.rhinoty.mr-extractor/torch-cache/ — TORCH_HOME 리다이렉트 (FR-12).
+pub fn torch_cache_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("torch-cache"))
+}
+
+/// htdemucs_ft 모델 파일 저장 디렉토리.
+/// demucs: {TORCH_HOME}/hub/checkpoints/{model}-*.th
+pub fn torch_checkpoints_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(torch_cache_path(app)?.join("hub").join("checkpoints"))
+}
+
+/// .setup-complete 마커 파일 (멱등성 힌트. 진실의 원천은 health check — Design §7).
+pub fn setup_marker_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join(".setup-complete"))
+}
+
+/// 번들된 Embedded Python 경로.
+/// Production: resource_dir/python/python.exe (NSIS bundle resources 복사)
+/// Dev: CARGO_MANIFEST_DIR/binaries/python/python.exe (Tauri는 dev에서 resources 자동 복사 X)
+///
+/// Plan §10.1 + Analysis G-I2: dev 모드에서 resource_dir이 target/debug/로 resolve되어
+/// 빌드 산출물 옆에 python이 없는 문제를 cfg(debug_assertions) 가드로 회피.
+pub fn embedded_python_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().resource_dir().map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    let prod_path = base.join("python").join("python.exe");
+    #[cfg(not(windows))]
+    let prod_path = base.join("python").join("bin").join("python3");
+
+    if prod_path.exists() {
+        return Ok(prod_path);
+    }
+
+    // Dev 모드 fallback. release 빌드에선 prod_path.exists() 가 true여야 정상.
+    #[cfg(debug_assertions)]
+    {
+        let dev_base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
+        #[cfg(windows)]
+        let dev_path = dev_base.join("python").join("python.exe");
+        #[cfg(not(windows))]
+        let dev_path = dev_base.join("python").join("bin").join("python3");
+        if dev_path.exists() {
+            return Ok(dev_path);
+        }
+        return Err(format!(
+            "내장 실행 환경을 찾을 수 없어요. `pnpm setup:binaries` 실행 후 다시 시도해주세요. (확인: {} | {})",
+            prod_path.display(),
+            dev_path.display()
+        ));
+    }
+    #[cfg(not(debug_assertions))]
+    Err(format!(
+        "내장 실행 환경을 찾을 수 없어요. (확인: {})",
+        prod_path.display()
+    ))
+}
+
+/// Sidecar 바이너리(ffmpeg/ffprobe/yt-dlp)가 위치한 디렉토리.
+/// Production: resource_dir 옆 (Tauri v2 externalBin 규칙)
+/// Dev: CARGO_MANIFEST_DIR/binaries/
+///
+/// PATH 환경변수 prepend 시 사용. demucs 등 subprocess가 ffmpeg를 찾을 때 필요.
+pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let resource = app.path().resource_dir().map_err(|e| e.to_string())?;
+    // Production: externalBin은 resource_dir 옆 (실행파일과 동일 dir)
+    if resource.join("ffmpeg-x86_64-pc-windows-msvc.exe").exists()
+        || resource.join("ffmpeg.exe").exists()
+    {
+        return Ok(resource);
+    }
+    #[cfg(debug_assertions)]
+    {
+        let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
+        if dev.exists() {
+            return Ok(dev);
+        }
+    }
+    Ok(resource)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// § 2. Probing — 원격 크기 확인 (Plan §8.2)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// pypi 패키지의 최신 wheel 크기 추정. Windows x64 우선, 없으면 pure wheel.
+/// Plan FR-14: 원격 크기 미리 확인해서 UI에 표시.
+pub async fn probe_pypi_wheel_size(pkg: &str) -> Result<u64, ()> {
+    let url = format!("https://pypi.org/pypi/{}/json", pkg);
+    let client = reqwest::Client::builder()
+        .timeout(PROBE_TIMEOUT)
+        .build()
+        .map_err(|_| ())?;
+    let resp = client.get(&url).send().await.map_err(|_| ())?;
+    if !resp.status().is_success() {
+        return Err(());
+    }
+    let json: serde_json::Value = resp.json().await.map_err(|_| ())?;
+    let urls = json.get("urls").and_then(|v| v.as_array()).ok_or(())?;
+
+    // Preference 1: Windows x64 wheel
+    for entry in urls {
+        let filename = entry.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+        if filename.contains("win_amd64") && filename.ends_with(".whl") {
+            if let Some(size) = entry.get("size").and_then(|v| v.as_u64()) {
+                return Ok(size);
+            }
+        }
+    }
+    // Preference 2: any-platform wheel
+    for entry in urls {
+        let filename = entry.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+        if filename.contains("-none-any") && filename.ends_with(".whl") {
+            if let Some(size) = entry.get("size").and_then(|v| v.as_u64()) {
+                return Ok(size);
+            }
+        }
+    }
+    // Preference 3: first wheel of any kind
+    for entry in urls {
+        let filename = entry.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+        if filename.ends_with(".whl") {
+            if let Some(size) = entry.get("size").and_then(|v| v.as_u64()) {
+                return Ok(size);
+            }
+        }
+    }
+    Err(())
+}
+
+/// HTTP HEAD로 Content-Length 확인. 모델 파일(dl.fbaipublicfiles.com) probing에 사용.
+pub async fn probe_url_size(url: &str) -> Result<u64, ()> {
+    let client = reqwest::Client::builder()
+        .timeout(PROBE_TIMEOUT)
+        .build()
+        .map_err(|_| ())?;
+    let resp = client.head(url).send().await.map_err(|_| ())?;
+    if !resp.status().is_success() {
+        return Err(());
+    }
+    resp.content_length().ok_or(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// § 3. Disk — 실측 / 여유 공간 / 종합 추정
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// 디렉토리 총 바이트 (재귀). FR-13: 실측 사용량 표시에 사용.
+/// 경로가 없거나 권한 거부 시 0 반환 (부분 설치 중에도 안전).
+pub fn dir_size(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    let mut total: u64 = 0;
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_dir() {
+            total = total.saturating_add(dir_size(&entry.path()));
+        } else {
+            total = total.saturating_add(meta.len());
+        }
+    }
+    total
+}
+
+/// `path`가 위치한 디스크에서 `required_mb` MB 이상 확보 가능한지.
+/// Plan FR-11: 설치 시작 전 호출. 부족 시 disk-full 상태 진입.
+pub fn check_disk_space(path: &Path, required_mb: u64) -> Result<bool, String> {
+    use sysinfo::Disks;
+    let disks = Disks::new_with_refreshed_list();
+
+    // 가장 구체적으로 일치하는 마운트 포인트(경로 prefix) 선택
+    let mut best_match_len: usize = 0;
+    let mut best_free: Option<u64> = None;
+    for d in disks.list() {
+        let mount = d.mount_point();
+        if path.starts_with(mount) {
+            let mount_len = mount.as_os_str().len();
+            if mount_len >= best_match_len {
+                best_match_len = mount_len;
+                best_free = Some(d.available_space());
+            }
+        }
+    }
+    let free_bytes = best_free.ok_or_else(|| "디스크 정보를 확인할 수 없어요.".to_string())?;
+    let free_mb = free_bytes / 1024 / 1024;
+    Ok(free_mb >= required_mb)
+}
+
+/// torch + demucs(pypi) + htdemucs_ft 모델(HEAD)을 합산한 예상 설치량(MB).
+/// Plan FR-14: 하나라도 probing 실패 → CONSERVATIVE_ESTIMATE_MB + probe_ok=false.
+pub async fn estimate_install_size(_app: &AppHandle) -> (u64, bool) {
+    let breakdown = estimate_install_size_breakdown().await;
+    (breakdown.install_mb + breakdown.model_mb, breakdown.probe_ok)
+}
+
+/// install / model 분리된 추정치. Plan FR-11 (disk breakdown UI)에 사용.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SizeEstimate {
+    /// torch + demucs (MB). probing 실패 시 CONSERVATIVE × ratio.
+    pub install_mb: u64,
+    /// htdemucs_ft Bag-of-4 (MB). probing 실패 시 CONSERVATIVE × (1 - ratio).
+    pub model_mb: u64,
+    /// 전체 probe 성공 여부. false면 fallback 값 사용. SC-12 hint 트리거.
+    pub probe_ok: bool,
+}
+
+/// torch+demucs+model을 분리해서 추정. Plan §3.2 NFR: 모든 값은 probe 또는
+/// CONSERVATIVE_ESTIMATE_MB의 비율로만 derive. 그 외 하드코딩 금지.
+pub async fn estimate_install_size_breakdown() -> SizeEstimate {
+    // 알려진 비율(Plan §10.4 + 실측 근거): torch+demucs ≈ 62%, htdemucs_ft ≈ 38%.
+    // probing 실패 시 이 비율로 CONSERVATIVE_ESTIMATE_MB 분배.
+    const INSTALL_RATIO_PCT: u64 = 62;
+
+    let torch_res = probe_pypi_wheel_size("torch").await;
+    let demucs_res = probe_pypi_wheel_size("demucs").await;
+    let model_res = probe_model_total_size().await;
+
+    match (torch_res, demucs_res, model_res) {
+        (Ok(t), Ok(d), Some(m)) => SizeEstimate {
+            install_mb: (t + d) / 1024 / 1024,
+            model_mb: m / 1024 / 1024,
+            probe_ok: true,
+        },
+        _ => {
+            let install_mb = CONSERVATIVE_ESTIMATE_MB * INSTALL_RATIO_PCT / 100;
+            let model_mb = CONSERVATIVE_ESTIMATE_MB.saturating_sub(install_mb);
+            SizeEstimate {
+                install_mb,
+                model_mb,
+                probe_ok: false,
+            }
+        }
+    }
+}
+
+/// `path` 가 위치한 디스크의 가용 공간(MB). Plan FR-11 disk-full UI에 사용.
+/// 디스크 정보 미상 시 0 반환 (호출자가 fits=false로 처리).
+pub fn available_space_mb(path: &Path) -> u64 {
+    use sysinfo::Disks;
+    let disks = Disks::new_with_refreshed_list();
+    let mut best_match_len: usize = 0;
+    let mut best_free: u64 = 0;
+    for d in disks.list() {
+        let mount = d.mount_point();
+        if path.starts_with(mount) {
+            let mount_len = mount.as_os_str().len();
+            if mount_len >= best_match_len {
+                best_match_len = mount_len;
+                best_free = d.available_space();
+            }
+        }
+    }
+    best_free / 1024 / 1024
+}
+
+/// htdemucs_ft Bag-of-4 체크포인트 URL 목록 전체 크기. 하나라도 실패 시 None.
+/// Phase 1: URL 목록이 비어있음 → None. Phase 2에서 실제 URL 추가.
+async fn probe_model_total_size() -> Option<u64> {
+    if HTDEMUCS_FT_MODEL_URLS.is_empty() {
+        return None;
+    }
+    let mut total: u64 = 0;
+    for url in HTDEMUCS_FT_MODEL_URLS {
+        match probe_url_size(url).await {
+            Ok(s) => total = total.saturating_add(s),
+            Err(_) => return None,
+        }
+    }
+    Some(total)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// § 4. Subprocess — 환경 변수 주입 규칙 (Plan §8.2)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Python subprocess에 주입할 환경 변수 셋.
+///   - TORCH_HOME        : 모델 캐시 리다이렉트 (~/.cache 오염 방지, FR-12)
+///   - PIP_CACHE_DIR     : pip 캐시 격리
+///   - PYTHONUNBUFFERED  : 진행률 stream 버퍼링 방지
+///   - PATH 선두에 ffmpeg sidecar dir prepend — demucs 내부 ffmpeg 폴백 대응
+///
+/// Phase 2에서 실제 subprocess 실행 시 사용. Phase 1에서는 API 계약만 확정.
+pub fn python_env_vars(app: &AppHandle) -> Result<Vec<(String, String)>, String> {
+    let appdata = app_data_dir(app)?;
+    let torch = torch_cache_path(app)?;
+    let pip_cache = appdata.join("pip-cache");
+
+    // ffmpeg sidecar 디렉토리: dev/prod 모두에서 안정적으로 resolve (Analysis G-I2 fix).
+    let ffmpeg_dir = sidecar_dir(app)?;
+
+    let mut path_val = ffmpeg_dir.to_string_lossy().to_string();
+    if let Ok(existing) = std::env::var("PATH") {
+        path_val.push(if cfg!(windows) { ';' } else { ':' });
+        path_val.push_str(&existing);
+    }
+
+    Ok(vec![
+        ("TORCH_HOME".into(), torch.to_string_lossy().to_string()),
+        ("PIP_CACHE_DIR".into(), pip_cache.to_string_lossy().to_string()),
+        ("PYTHONUNBUFFERED".into(), "1".into()),
+        ("PATH".into(), path_val),
+    ])
+}

@@ -3,6 +3,7 @@
 mod commands;
 
 use commands::{setup, youtube, separate, video, export};
+use commands::setup::InstallHandle;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -16,10 +17,15 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::default().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_process::init())
-        // Commands
+        // State (Design §6.3 — install_dependencies <-> cancel_install 공유)
+        .manage(InstallHandle::default())
+        // Commands (Design §4.1 Command List + Phase 3 추가: check_disk_space)
         .invoke_handler(tauri::generate_handler![
             setup::check_environment,
             setup::install_dependencies,
+            setup::check_internet,
+            setup::check_disk_space,
+            setup::cancel_install,
             youtube::download_youtube,
             separate::separate_audio,
             video::extract_audio,
