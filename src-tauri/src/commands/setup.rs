@@ -167,11 +167,16 @@ pub async fn check_environment(app: AppHandle) -> Result<EnvStatus, String> {
 
 /// sidecar binary의 --version 호출로 Ready 여부 판정.
 /// Tauri v2 `app.shell().sidecar(name)`는 target-triple 리졸브를 내부에서 처리.
+///
+/// Plan §5 Risks: Windows SmartScreen/Defender 오탐. 200MB+ ffmpeg 같은 큰 unsigned
+/// 바이너리는 첫 실행 시 AV 스캔이 5~30초 걸릴 수 있어 타임아웃을 30s로 둠.
+/// 두 번째 이후 실행은 즉시 응답 (OS 캐시).
 async fn probe_sidecar(app: &AppHandle, name: &str, label: &str) -> EnvItem {
     let Ok(cmd) = app.shell().sidecar(name) else {
+        eprintln!("[probe_sidecar] {} sidecar resolve 실패 (capabilities 또는 externalBin 누락?)", name);
         return missing(label);
     };
-    let run = tokio_timeout(Duration::from_secs(5), cmd.args(["--version"]).output()).await;
+    let run = tokio_timeout(Duration::from_secs(30), cmd.args(["--version"]).output()).await;
 
     match run {
         Ok(Ok(output)) if output.status.success() => {
@@ -180,7 +185,27 @@ async fn probe_sidecar(app: &AppHandle, name: &str, label: &str) -> EnvItem {
             let version = parse_version(&stdout).or_else(|| parse_version(&stderr));
             ready(label, version)
         }
-        _ => missing(label),
+        Ok(Ok(output)) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!(
+                "[probe_sidecar] {} non-zero exit (status={:?}): {}",
+                name,
+                output.status.code(),
+                stderr.lines().next().unwrap_or("")
+            );
+            missing(label)
+        }
+        Ok(Err(e)) => {
+            eprintln!("[probe_sidecar] {} spawn 실패: {}", name, e);
+            missing(label)
+        }
+        Err(_) => {
+            eprintln!(
+                "[probe_sidecar] {} 30s 타임아웃 — AV 첫 스캔 또는 락업 가능성",
+                name
+            );
+            missing(label)
+        }
     }
 }
 
@@ -197,7 +222,7 @@ async fn probe_python(app: &AppHandle, label: &str) -> EnvItem {
     }
 
     let run = tokio_timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(15),
         TokioCommand::new(&venv_py).arg("--version").output(),
     )
     .await;
@@ -209,6 +234,10 @@ async fn probe_python(app: &AppHandle, label: &str) -> EnvItem {
             // "Python 3.11.9" 형태
             let version = parse_version(&stdout).or_else(|| parse_version(&stderr));
             ready(label, version)
+        }
+        Err(_) => {
+            eprintln!("[probe_python] {} 15s 타임아웃", venv_py.display());
+            missing(label)
         }
         _ => missing(label),
     }
