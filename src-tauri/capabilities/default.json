@@ -8,19 +8,17 @@
     {
       "identifier": "shell:allow-execute",
       "allow": [
-        { "name": "python-demucs", "cmd": "python", "args": true },
-        { "name": "ffmpeg", "cmd": "ffmpeg", "args": true },
-        { "name": "ffprobe", "cmd": "ffprobe", "args": true },
-        { "name": "yt-dlp", "cmd": "yt-dlp", "args": true }
+        { "name": "ffmpeg", "sidecar": true, "args": true },
+        { "name": "ffprobe", "sidecar": true, "args": true },
+        { "name": "yt-dlp", "sidecar": true, "args": true }
       ]
     },
     {
       "identifier": "shell:allow-spawn",
       "allow": [
-        { "name": "python-demucs", "cmd": "python", "args": true },
-        { "name": "ffmpeg", "cmd": "ffmpeg", "args": true },
-        { "name": "ffprobe", "cmd": "ffprobe", "args": true },
-        { "name": "yt-dlp", "cmd": "yt-dlp", "args": true }
+        { "name": "ffmpeg", "sidecar": true, "args": true },
+        { "name": "ffprobe", "sidecar": true, "args": true },
+        { "name": "yt-dlp", "sidecar": true, "args": true }
       ]
     },
     "shell:allow-stdin-write",

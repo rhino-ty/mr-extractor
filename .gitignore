@@ -6,6 +6,10 @@ dist/
 src-tauri/target/
 src-tauri/gen/
 
+# Sidecar binaries (fetched by scripts/download-binaries.js, Design Ref: §11.1)
+src-tauri/binaries/
+!src-tauri/binaries/.keep
+
 # Environment
 .env
 .env.*

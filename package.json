@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
+    "setup:binaries": "node scripts/download-binaries.js",
     "tauri": "tauri"
   },
   "devDependencies": {
