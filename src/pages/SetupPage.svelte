@@ -7,6 +7,7 @@
 
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
+  import { exit } from "@tauri-apps/plugin-process";
   import { navigateTo } from "$lib/stores";
   import {
     cancelInstall,
@@ -16,7 +17,7 @@
     installDependencies,
   } from "$lib/commands";
   import { translateToFriendlyMessage } from "$lib/errorMessages";
-  import type { EnvItem, InstallProgress, SetupPageState } from "$lib/types";
+  import type { EnvItem, EnvStatus, InstallProgress, SetupPageState } from "$lib/types";
   import EnvItemRow from "../components/setup/EnvItemRow.svelte";
 
   let pageState: SetupPageState = $state({ kind: "detecting" });
@@ -58,9 +59,10 @@
         return;
       }
 
-      // Phase 3 guard chain (Design §5.1, Plan FR-04 순차):
+      // Guard chain (Design §5.1, Plan FR-04 순차):
       //   missing → check_internet → no-internet
       //           → check_disk_space → disk-full
+      //           → prompt-install (사용자 동의 — Plan FR-04 deviation, 명시적 요청)
       //           → installing
       const online = await checkInternet().catch(() => true);
       if (!online) {
@@ -78,55 +80,14 @@
         return;
       }
 
-      // 모든 가드 통과 → installing
+      // 모든 가드 통과 → 설치 동의 다이얼로그
       pageState = {
-        kind: "installing",
+        kind: "prompt-install",
         items: status.items,
-        progress: {
-          step: "앱을 사용할 준비를 하고 있어요...",
-          percent: 0,
-          phase: "extract_python",
-          currentSizeMb: null,
-          estimatedFinalMb: status.installSizeEstimateMb,
-        },
+        breakdown: disk.breakdown,
+        freeMb: disk.freeMb,
+        sizeProbeOk: disk.sizeProbeSucceeded,
       };
-
-      try {
-        await installDependencies((p) => {
-          if (pageState.kind !== "installing") return;
-          pageState = {
-            kind: "installing",
-            items: applyPhaseToItems(pageState.items, p),
-            progress: p,
-          };
-        });
-
-        // 설치 성공 → 한 번 더 detect (health check) → all_ready 검증
-        const reCheck = await checkEnvironment();
-        if (reCheck.allReady) {
-          pageState = {
-            kind: "ready",
-            items: reCheck.items,
-            sizeMb: reCheck.installSizeEstimateMb,
-          };
-          setTimeout(() => navigateTo("queue"), 1000);
-        } else {
-          pageState = {
-            kind: "error",
-            items: reCheck.items,
-            message: "설치는 끝났지만 일부 항목을 확인하지 못했어요. 다시 시도해주세요.",
-            detail: "post-install health check failed",
-          };
-        }
-      } catch (e) {
-        const raw = String(e);
-        pageState = {
-          kind: "error",
-          items: pageState.kind === "installing" ? pageState.items : status.items,
-          message: translateToFriendlyMessage(raw),
-          detail: raw,
-        };
-      }
     } catch (e) {
       const raw = String(e);
       pageState = {
@@ -135,6 +96,71 @@
         message: translateToFriendlyMessage(raw),
         detail: raw,
       };
+    }
+  }
+
+  // 설치 동의 후 install_dependencies 진입.
+  async function runInstall() {
+    if (pageState.kind !== "prompt-install") return;
+    const initialItems = pageState.items;
+    const estimatedFinalMb =
+      pageState.breakdown.install + pageState.breakdown.model + pageState.breakdown.staging;
+
+    pageState = {
+      kind: "installing",
+      items: initialItems,
+      progress: {
+        step: "앱을 사용할 준비를 하고 있어요...",
+        percent: 0,
+        phase: "extract_python",
+        currentSizeMb: null,
+        estimatedFinalMb,
+      },
+    };
+
+    try {
+      await installDependencies((p) => {
+        if (pageState.kind !== "installing") return;
+        pageState = {
+          kind: "installing",
+          items: applyPhaseToItems(pageState.items, p),
+          progress: p,
+        };
+      });
+
+      const reCheck: EnvStatus = await checkEnvironment();
+      if (reCheck.allReady) {
+        pageState = {
+          kind: "ready",
+          items: reCheck.items,
+          sizeMb: reCheck.installSizeEstimateMb,
+        };
+        setTimeout(() => navigateTo("queue"), 1000);
+      } else {
+        pageState = {
+          kind: "error",
+          items: reCheck.items,
+          message: "설치는 끝났지만 일부 항목을 확인하지 못했어요. 다시 시도해주세요.",
+          detail: "post-install health check failed",
+        };
+      }
+    } catch (e) {
+      const raw = String(e);
+      pageState = {
+        kind: "error",
+        items: pageState.kind === "installing" ? pageState.items : initialItems,
+        message: translateToFriendlyMessage(raw),
+        detail: raw,
+      };
+    }
+  }
+
+  async function declineInstall() {
+    // 사용자가 설치를 거절 → 앱 종료. 설치 없이는 동작 불가.
+    try {
+      await exit(0);
+    } catch {
+      // exit 실패 시에도 다른 화면 안전하게 유지
     }
   }
 
@@ -174,6 +200,62 @@
         <p class="text-sm text-muted">환경을 확인하고 있어요...</p>
         <div class="mt-4 h-1 w-48 overflow-hidden rounded-full bg-surface">
           <div class="h-full animate-pulse rounded-full bg-accent" style="width: 60%"></div>
+        </div>
+      </div>
+    {:else if pageState.kind === "prompt-install"}
+      <div class="flex flex-col gap-4 py-6" in:fade={{ duration: 200 }}>
+        <div class="text-center text-4xl">📦</div>
+        <h1 class="text-center text-xl font-bold">처음 사용하시려면 설치가 필요해요</h1>
+        <p class="text-center text-sm text-muted">
+          앱이 동작하려면 다음 항목들을 받아야 해요. 한 번만 설치되고, 다음부터는 바로 시작돼요.
+        </p>
+
+        <div class="rounded-xl border border-border bg-surface p-4 text-sm">
+          <div class="mb-2 font-semibold">설치할 항목</div>
+          <div class="flex justify-between py-1">
+            <span class="text-muted">🎵 음원 분리 엔진</span>
+            <span>{formatSize(pageState.breakdown.install)}</span>
+          </div>
+          <div class="flex justify-between py-1">
+            <span class="text-muted">🤖 AI 모델</span>
+            <span>{formatSize(pageState.breakdown.model)}</span>
+          </div>
+          <div class="flex justify-between py-1 text-xs text-muted">
+            <span>설치 중 임시 공간</span>
+            <span>{formatSize(pageState.breakdown.staging)}</span>
+          </div>
+          <hr class="my-2 border-border" />
+          <div class="flex justify-between py-1 font-semibold">
+            <span>총 필요 공간</span>
+            <span>{formatSize(pageState.breakdown.total)}</span>
+          </div>
+          <div class="flex justify-between py-1 text-xs text-muted">
+            <span>현재 여유 공간</span>
+            <span>{formatSize(pageState.freeMb)} ✅</span>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-border bg-bg/50 p-3 text-xs text-muted">
+          <p>⏱ 설치 시간: 약 3~5분 (인터넷 속도에 따라 달라져요)</p>
+          <p>📡 인터넷 연결이 필요해요</p>
+          {#if !pageState.sizeProbeOk}
+            <p class="text-warn">ℹ 정확한 크기를 확인하지 못해 추정값을 표시했어요. 실제 크기는 다를 수 있어요.</p>
+          {/if}
+        </div>
+
+        <div class="flex gap-2">
+          <button
+            class="flex-1 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-semibold text-muted hover:bg-bg"
+            onclick={declineInstall}
+          >
+            ✕ 닫기
+          </button>
+          <button
+            class="flex-1 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+            onclick={runInstall}
+          >
+            ✅ 설치 시작
+          </button>
         </div>
       </div>
     {:else if pageState.kind === "ready"}

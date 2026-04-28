@@ -65,6 +65,13 @@ export interface DiskCheck {
 
 export type SetupPageState =
   | { kind: "detecting" }
+  | {
+      kind: "prompt-install";
+      items: EnvItem[];
+      breakdown: DiskBreakdown;
+      freeMb: number;
+      sizeProbeOk: boolean;
+    }
   | { kind: "installing"; progress: InstallProgress; items: EnvItem[] }
   | { kind: "ready"; items: EnvItem[]; sizeMb: number }
   | { kind: "error"; items: EnvItem[]; message: string; detail: string }
