@@ -26,8 +26,11 @@ pub fn run() {
             setup::check_internet,
             setup::check_disk_space,
             setup::cancel_install,
+            #[cfg(debug_assertions)]
             setup::read_setup_log,
+            #[cfg(debug_assertions)]
             setup::clear_setup_log,
+            #[cfg(debug_assertions)]
             setup::setup_log_path,
             youtube::download_youtube,
             separate::separate_audio,

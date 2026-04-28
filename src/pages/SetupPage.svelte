@@ -23,6 +23,10 @@
   import type { EnvItem, EnvStatus, InstallProgress, SetupPageState } from "$lib/types";
   import EnvItemRow from "../components/setup/EnvItemRow.svelte";
 
+  // Vite/Tauri build flag — `pnpm tauri dev`는 true, `pnpm tauri build`는 false.
+  // 진단 로그 UI는 debug 빌드에만 노출 (Rust 측 read_setup_log도 cfg(debug_assertions)로 제거됨).
+  const IS_DEV = import.meta.env.DEV;
+
   let pageState: SetupPageState = $state({ kind: "detecting" });
   let detailOpen = $state(false);
   let canceling = $state(false);
@@ -242,7 +246,7 @@
 </script>
 
 <div class="relative flex h-full items-center justify-center p-6">
-  {#if logOpen}
+  {#if IS_DEV && logOpen}
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
       role="dialog"
@@ -427,9 +431,11 @@
               >
                 📋 오류 복사
               </button>
-              <button class="text-xs text-accent hover:underline" onclick={openLog}>
-                📜 진단 로그 보기
-              </button>
+              {#if IS_DEV}
+                <button class="text-xs text-accent hover:underline" onclick={openLog}>
+                  📜 진단 로그 보기
+                </button>
+              {/if}
             </div>
           {/if}
         </div>

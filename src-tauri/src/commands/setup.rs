@@ -1103,11 +1103,12 @@ fn kill_process_tree(pid: u32) -> Result<(), String> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Dev Logging API — debug 빌드 진단용. release에선 빈 결과/no-op.
+// Dev Logging API — debug 빌드 전용. release 빌드엔 컴파일 자체에서 제외됨.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// `%APPDATA%/com.rhinoty.mr-extractor/setup.log` 내용을 반환.
-/// 파일 없거나 release 빌드면 빈 문자열.
+/// 파일 없으면 빈 문자열.
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn read_setup_log(app: AppHandle) -> Result<String, String> {
     let path = common::setup_log_path(&app)?;
@@ -1120,6 +1121,7 @@ pub async fn read_setup_log(app: AppHandle) -> Result<String, String> {
 }
 
 /// 로그 파일 비우기 (재시도 시 깨끗한 상태로 시작).
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn clear_setup_log(app: AppHandle) -> Result<(), String> {
     let path = common::setup_log_path(&app)?;
@@ -1133,6 +1135,7 @@ pub async fn clear_setup_log(app: AppHandle) -> Result<(), String> {
 }
 
 /// 로그 파일 경로 반환 (외부 에디터로 열기 안내용).
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub fn setup_log_path(app: AppHandle) -> Result<String, String> {
     Ok(common::setup_log_path(&app)?.to_string_lossy().to_string())
