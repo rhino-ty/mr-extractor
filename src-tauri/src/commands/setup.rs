@@ -204,7 +204,14 @@ async fn probe_sidecar(app: &AppHandle, name: &str, label: &str) -> EnvItem {
         );
         return missing(label);
     };
-    let run = tokio_timeout(Duration::from_secs(30), cmd.args(["--version"]).output()).await;
+    // ffmpeg/ffprobe는 single-dash `-version`만 받음 (GNU 컨벤션 미준수).
+    // `--version`을 주면 unknown option으로 처리되어 exit non-zero. 배너는 stdout에 나와도
+    // 우리는 status.success() 검사를 하므로 missing 처리됨. 도구별로 분기.
+    let version_flag = match name {
+        "ffmpeg" | "ffprobe" => "-version",
+        _ => "--version",
+    };
+    let run = tokio_timeout(Duration::from_secs(30), cmd.args([version_flag]).output()).await;
     let elapsed_ms = started.elapsed().as_millis();
 
     match run {
