@@ -3,10 +3,10 @@
 > **Summary**: 사용자 메인 허브. URL/파일 입력 → 큐 적재 → 다중 선택 + [▶ 분리 시작] → ProcessPage. setup-page Foundation API 첫 재사용. **Option C (Pragmatic)** 채택 — video.rs / youtube.rs 단일 파일 + common::§5 Error Translation + QueueHandle 별도.
 >
 > **Project**: MR Extractor
-> **Version**: 0.1
+> **Version**: 0.4
 > **Author**: rhino-ty
 > **Date**: 2026-04-29
-> **Status**: Draft v0.1 — Option C 확정 (사용자 승인)
+> **Status**: Confirmed v0.4 — Iteration 3 stability check fix (translate_error 충돌 / Phase 매핑 정정 / Cargo.toml 의존 회피 등 6건). Design 안정화 완료.
 > **Planning Doc**: [queue-page.plan.md v0.6](../../01-plan/features/queue-page.plan.md)
 
 ---
@@ -118,15 +118,21 @@
 │  │   │   § 2. download_youtube (--output {tmp}/{id}.%ext) │        │
 │  │   │   § 3. cancel hook (QueueHandle PID 등록)          │        │
 │  │   │   § 4. friendly error (translate_error w/ ctx)     │        │
+│  │   ├─ queue.rs (신규 — fix A/B)                          │        │
+│  │   │   § 1. QueueHandle (Mutex<HashMap<String, u32>>)   │        │
+│  │   │   § 2. cancel_queue_item (Tauri command)           │        │
 │  │   └─ common.rs (확장)                                   │        │
 │  │       § 1. queue_tmp_dir(app) 신규                     │        │
 │  │       § 5. Error Translation (신규, setup translate_error 이전) │ │
 │  │           - translate_error(raw, ctx: ErrorContext)    │        │
 │  │           - ErrorContext::Setup / YoutubeDownload /    │        │
 │  │             VideoExtract / FetchMetadata               │        │
+│  │       § 6. Process Helpers (신규, fix J/K/L)            │        │
+│  │           - kill_process_tree(pid) — setup.rs에서 이전   │        │
 │  └──────────────────┬───────────────────────────────────┘        │
 │  ┌──────────────────▼───────────────────────────────────┐        │
 │  │  src/lib.rs (확장)                                     │        │
+│  │   use commands::queue::QueueHandle;                    │        │
 │  │   .manage(InstallHandle::default())  // 기존            │        │
 │  │   .manage(QueueHandle::default())    // 신규 (FR-18)   │        │
 │  │   .invoke_handler(generate_handler![                  │        │
@@ -135,11 +141,8 @@
 │  │     video::fetch_video_metadata,                       │        │
 │  │     youtube::download_youtube,                         │        │
 │  │     youtube::fetch_youtube_metadata,                   │        │
-│  │     queue::cancel_queue_item,    // 신규               │        │
+│  │     queue::cancel_queue_item,                          │        │
 │  │   ])                                                   │        │
-│  │                                                        │        │
-│  │  QueueHandle: Mutex<HashMap<String, u32>>             │        │
-│  │  (item id → child PID 매핑, FR-18)                     │        │
 │  └────────────────────┬───────────────────────────────┘        │
 └─────────────────────────┼──────────────────────────────────────┘
                           │ subprocess (tokio::Command)
@@ -166,10 +169,11 @@ UrlInput.svelte
      └─ OK
          │
          ▼
-     queue.ts::addToQueue({sourceType: "youtube", source, label: "다운로드 준비 중..."})
+     queue.ts::addToQueue({sourceType: "youtube", source, label: "다운로드 준비 중...", status: "fetching-metadata"})
          │
-         │ ⚡ 1초 내 FileCard 등장 (placeholder)  ← SC-1
+         │ ⚡ 1초 내 FileCard 등장 (placeholder + ⏳ fetching-metadata 표시)  ← SC-1
          │ → queueStore.update + Tauri Store sync (debounce 500ms)
+         │ → ※ 영속화 대상은 status="pending"만이므로 fetching-metadata는 sync skip
          │
          ├─────────────────────────────┐
          │                             │
@@ -183,8 +187,9 @@ UrlInput.svelte
          │
          ◄─ Result<{title, durationSec}, String> ─┘
          │
-         │ ⚡ ~5초 내 라벨 갱신          ← SC-19
-         │ queueStore.updateItem(id, {label: "{title} ({mm:ss})", durationSec})
+         │ ⚡ ~5초 내 라벨 + status 갱신  ← SC-19
+         │ queueStore.updateItem(id, {label: "{title} ({mm:ss})", durationSec, status: "pending"})
+         │ → 이제 영속화 대상
          │
          └─ 사용자가 [▶ 분리 시작] 클릭 시 → 시나리오 C
 ```
@@ -204,9 +209,10 @@ DropZone.svelte
      └─ OK (audio 또는 video)
          │
          ▼
-     queue.ts::addToQueue({sourceType: "file" 또는 "video", source: absPath, label: basename})
+     queue.ts::addToQueue({sourceType: "file" 또는 "video", source: absPath, label: basename, status: "fetching-metadata"})
          │
-         │ ⚡ 1초 내 FileCard 등장        ← SC-2
+         │ ⚡ 1초 내 FileCard 등장 (⏳ fetching-metadata)  ← SC-2
+         │ → 영속화 sync skip (status가 pending 아님)
          │
          ▼
      invoke('fetch_video_metadata', {itemId, path})  // ffprobe (~수백ms)
@@ -215,7 +221,8 @@ DropZone.svelte
          │
          └─ OK
              │
-             │ queueStore.updateItem(id, {durationSec, label: "{basename} ({mm:ss})"})
+             │ queueStore.updateItem(id, {durationSec, label: "{basename} ({mm:ss})", status: "pending"})
+             │ → 이제 영속화 대상
              │
              └─ 사용자가 [▶ 분리 시작] 클릭 시 → 시나리오 C
 ```
@@ -272,10 +279,11 @@ queue.ts::removeFromQueue(id)
 
 | Component | Depends On | Purpose |
 |---|---|---|
-| `video.rs` | `common::*` (sidecar_dir / queue_tmp_dir / dev_log / translate_error / ErrorContext::VideoExtract) + `tokio::process` + `tauri::ipc::Channel` | ffprobe + ffmpeg subprocess + 진행률 + 친절 에러 |
-| `youtube.rs` | `common::*` (동일 + ErrorContext::YoutubeDownload) + `tokio::process` + `tauri::ipc::Channel` | yt-dlp subprocess + metadata + 진행률 + 친절 에러 |
+| `video.rs` | `common::*` (sidecar_dir / queue_tmp_dir / dev_log / translate_error / ErrorContext::VideoExtract) + `queue::QueueHandle` (cancel hook) + `tokio::process` + `tauri::ipc::Channel` | ffprobe + ffmpeg subprocess + 진행률 + 친절 에러 |
+| `youtube.rs` | `common::*` (동일 + ErrorContext::YoutubeDownload) + `queue::QueueHandle` (cancel hook) + `tokio::process` + `tauri::ipc::Channel` | yt-dlp subprocess + metadata + 진행률 + 친절 에러 |
+| `queue.rs` (신규) | `std::sync::Mutex` + `HashMap` + `common::queue_tmp_dir` + `common::kill_process_tree` | QueueHandle State 정의 + cancel_queue_item Tauri command |
 | `common.rs §5 Error Translation` | `std` only | 에러 매핑 단일 출처. setup.rs translate_error 이전 |
-| `QueueHandle` (lib.rs) | `std::sync::Mutex` + `HashMap` | item id → PID 매핑. cancel_queue_item이 사용 |
+| `common.rs §6 Process Helpers` | `std::process` | kill_process_tree (Windows taskkill /F /T /PID). setup.rs에서 이전 |
 | `QueuePage.svelte` | `$lib/stores` (queueStore + navigateTo) + `$lib/queue` + `$lib/commands` + `$lib/errorMessages` | UI 진입점 + 단축키 + 라우팅 |
 | `DropZone / UrlInput / FileCard / EmptyState` | `$lib/queue` + `queueStore` | UI primitives |
 | `Toast.svelte` | `$lib/stores::toastStore` | UI primitives. 다른 페이지에서도 재사용 |
@@ -301,7 +309,7 @@ use tauri::ipc::Channel;
 #[serde(rename_all = "camelCase")]
 pub struct VideoMetadata {
     pub item_id: String,
-    pub duration_sec: u32,  // ffprobe duration. 0이면 corrupt 시그널
+    pub duration_sec: u32,  // ffprobe duration (sec). Ok로 반환되는 경우 항상 > 0 (fix C — 0은 Err로 처리)
 }
 
 #[derive(Clone, Serialize)]
@@ -328,7 +336,7 @@ pub struct DownloadProgress {
     pub percent: u32,
 }
 
-// lib.rs
+// src-tauri/src/commands/queue.rs (신규 파일, fix A/B — lib.rs 인라인 대신 별도 파일로)
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -343,6 +351,9 @@ impl QueueHandle {
         self.0.lock().ok().and_then(|mut g| g.remove(id))
     }
 }
+
+// queue.rs는 §2 cancel_queue_item Tauri command도 담음 (§4.2 참조).
+// lib.rs는 use commands::queue::QueueHandle만 import 후 manage().
 ```
 
 ### 3.2 TypeScript Types (src/lib/types.ts 추가분)
@@ -400,16 +411,18 @@ export interface ExtractProgress {
 // Toast (Phase 1, Plan §10.2 자체 구현)
 export type ToastKind = "info" | "success" | "warn" | "error";
 export interface Toast {
-  id: string;
+  id: string;          // crypto.randomUUID() (QueueItem과 동일 규칙, fix #11)
   kind: ToastKind;
   message: string;
   durationMs: number;  // default 3000
 }
 
 // 페이지별 navigateTo payload
+// FR-19: model literal "htdemucs_ft" — Phase 3 시점엔 고정값.
+// v1.1 ModelSelector 도입 시 ModelId union ("htdemucs"|"htdemucs_ft"|"htdemucs_6s")으로 확장 (fix O)
 export type NavigatePayload =
   | { kind: "queue" }
-  | { kind: "process"; ids: string[]; model: "htdemucs_ft" }  // FR-19 model 고정
+  | { kind: "process"; ids: string[]; model: "htdemucs_ft" }
   | { kind: "player"; itemId: string }
   | { kind: "history" }
   | { kind: "settings" }
@@ -429,16 +442,25 @@ setup-page와 동일: Rust `snake_case` ↔ TS `camelCase`. 모든 struct에 `#[
 | Name | Input | Return | Channel Event | Notes |
 |---|---|---|---|---|
 | `fetch_video_metadata` | `app: AppHandle, item_id: String, path: String` | `Result<VideoMetadata, String>` | — | ffprobe 단일 호출. duration=0 → corrupt 시그널 |
-| `extract_audio` | `app, item_id, path, on_progress: Channel<ExtractProgress>, handle: State<QueueHandle>` | `Result<String, String>` (tmpPath) | `ExtractProgress` | ffmpeg subprocess + Channel + 30분 timeout |
+| `extract_audio` | `app, item_id, path, duration_sec: u32, on_progress: Channel<ExtractProgress>, handle: State<QueueHandle>` | `Result<String, String>` (tmpPath) | `ExtractProgress` | ffmpeg subprocess + Channel + 30분 timeout. **`duration_sec`는 frontend가 fetch_video_metadata 결과 캐시해서 전달** (중복 ffprobe 호출 회피, fix #1) |
 | `fetch_youtube_metadata` | `app, item_id: String, url: String` | `Result<YoutubeMetadata, String>` | — | yt-dlp `--skip-download --print` (~3~5초). 실패 시 fallback Err |
 | `download_youtube` | `app, item_id, url, on_progress: Channel<DownloadProgress>, handle: State<QueueHandle>` | `Result<String, String>` (tmpPath) | `DownloadProgress` | yt-dlp `--output {tmp}/{id}.%(ext)s --no-playlist --no-mtime --no-warnings`. timeout 없음 (NFR Limits) |
-| `cancel_queue_item` | `item_id: String, handle: State<QueueHandle>` | `Result<(), String>` | — | QueueHandle.take(id) → tree kill (Windows taskkill /F /T /PID) + tmp cleanup |
+| `cancel_queue_item` | `app: AppHandle, item_id: String, handle: State<QueueHandle>` | `Result<(), String>` | — | QueueHandle.take(id) → `common::kill_process_tree` (setup.rs에서 이전) + tmp cleanup. **app 인자 필수** — queue_tmp_dir 경로 resolve용 (fix #5) |
 
 ### 4.2 Detailed Specifications
 
 #### `fetch_video_metadata`
 
+> **Timeout 정당화**: ffprobe `-show_format`은 영상 헤더만 읽음 (수백ms 표준). 10초는 NFS/SMB 마운트 등 느린 디스크 + AV 스캔 흡수용 안전 마진 (fix #10).
+
 ```rust
+// fix VI: import 명시
+use std::time::Duration;
+use tauri::AppHandle;
+use tokio::process::Command as TokioCommand;
+use tokio::time::timeout as tokio_timeout;
+use crate::commands::common;
+
 #[tauri::command]
 pub async fn fetch_video_metadata(
     app: AppHandle,
@@ -449,7 +471,7 @@ pub async fn fetch_video_metadata(
 
     let ffprobe = common::sidecar_dir(&app)?.join("ffprobe-x86_64-pc-windows-msvc.exe");
     let output = tokio_timeout(
-        Duration::from_secs(10),
+        Duration::from_secs(10),  // fix #10: 헤더 읽기는 ms 단위, 10s는 안전 마진
         TokioCommand::new(&ffprobe)
             .args(["-v", "quiet", "-print_format", "json", "-show_format", &path])
             .output(),
@@ -484,17 +506,21 @@ pub async fn fetch_video_metadata(
 
 #### `extract_audio`
 
+> **fix #1: metadata 중복 호출 회피**. UI는 큐 추가 시 이미 `fetch_video_metadata`로 `durationSec`을
+> 받아 `QueueItem.durationSec` 캐시. extract_audio 호출 시 인자로 전달. Rust 측 ffprobe 재호출 X.
+
 ```rust
 #[tauri::command]
 pub async fn extract_audio(
     app: AppHandle,
     item_id: String,
     path: String,
+    duration_sec: u32,  // fix #1: frontend가 캐시해서 전달
     on_progress: Channel<ExtractProgress>,
     handle: State<'_, QueueHandle>,
 ) -> Result<String, String> {
-    let total_sec = (fetch_video_metadata(app.clone(), item_id.clone(), path.clone()).await?).duration_sec;
     let tmp_path = common::queue_tmp_dir(&app)?.join(format!("{}.wav", item_id));
+    let total_sec = duration_sec.max(1);  // 0 방지 (fetch 단계서 corrupt 차단된 가정)
 
     let ffmpeg = common::sidecar_dir(&app)?.join("ffmpeg-x86_64-pc-windows-msvc.exe");
     let mut child = TokioCommand::new(&ffmpeg)
@@ -576,6 +602,8 @@ pub async fn fetch_youtube_metadata(
 
 #### `download_youtube`
 
+> **fix #2: TODO 제거, 의사코드 spec으로**. 본구현은 Phase 3에서 진행하지만 Design 단계에서 설계 의도 명확화.
+
 ```rust
 #[tauri::command]
 pub async fn download_youtube(
@@ -585,54 +613,106 @@ pub async fn download_youtube(
     on_progress: Channel<DownloadProgress>,
     handle: State<'_, QueueHandle>,
 ) -> Result<String, String> {
+    common::dev_log(&app, &format!("queue:download_youtube({}): start url={}", item_id, url));
+
     let tmp_dir = common::queue_tmp_dir(&app)?;
+    tokio::fs::create_dir_all(&tmp_dir).await.map_err(|e| e.to_string())?;
     let output_pattern = tmp_dir.join(format!("{}.%(ext)s", item_id));
 
-    let ytdlp = app.shell().sidecar("yt-dlp")
+    // FR-15/16: --output 강제 + --no-playlist + --no-mtime + --no-warnings
+    let mut child = app.shell()
+        .sidecar("yt-dlp")
+        .map_err(|e| common::translate_error(&e.to_string(), common::ErrorContext::YoutubeDownload))?
+        .args([
+            "--output", &output_pattern.to_string_lossy(),
+            "--no-playlist",
+            "--no-mtime",
+            "--no-warnings",
+            "--newline",  // 진행률 라인 단위 buffer flush
+            &url,
+        ])
+        .spawn()
         .map_err(|e| common::translate_error(&e.to_string(), common::ErrorContext::YoutubeDownload))?;
 
-    // FR-15/16: --no-playlist + --output 강제
-    let cmd = ytdlp.args([
-        "--output", &output_pattern.to_string_lossy(),
-        "--no-playlist",
-        "--no-mtime",
-        "--no-warnings",
-        &url,
-    ]);
+    // ① QueueHandle 등록 (cancel_queue_item이 PID 조회 가능하도록)
+    if let Some(pid) = child.id() {
+        handle.register(item_id.clone(), pid);
+    }
 
-    // [download] N% / N MB 라인 정규식 파싱 → Channel emit
-    // QueueHandle.register(item_id, pid)
-    // (디테일은 setup::pip_install 패턴 응용)
+    // ② stdout 라인 단위 파싱 — yt-dlp `[download]  45.2% of 12.3MiB at ...`
+    //    fix V: regex 의존 회피 — string find로 충분 (Cargo.toml 변경 0)
+    //    setup::pip_install ticker 패턴 응용 + 라인별 % 추출
+    let stdout = child.stdout.take().ok_or("stdout 캡처 실패")?;
+    let mut reader = tokio::io::BufReader::new(stdout).lines();
+    while let Ok(Some(line)) = reader.next_line().await {
+        if let Some(start) = line.find("[download]") {
+            let after = &line[start + 10..];
+            if let Some(pct_end) = after.find('%') {
+                let pct_str = after[..pct_end].trim();
+                if let Ok(percent_f) = pct_str.parse::<f32>() {
+                    on_progress.send(DownloadProgress {
+                        item_id: item_id.clone(),
+                        step: "다운로드 중...".into(),
+                        percent: percent_f as u32,
+                    }).ok();
+                }
+            }
+        }
+    }
 
-    // 실제 다운로드 파일 이름: {item_id}.{webm|mp4|...}
-    // glob으로 찾아서 반환
-    // ...
-    todo!("download_youtube 본구현 — Phase 3");
+    // ③ 종료 대기 + cleanup
+    let status = child.wait().await.map_err(|e| e.to_string())?;
+    handle.take(&item_id);  // PID 슬롯 비움
+
+    if !status.success() {
+        return Err(common::translate_error(
+            "yt-dlp exit non-zero",
+            common::ErrorContext::YoutubeDownload,
+        ));
+    }
+
+    // ④ 실제 다운로드 파일 찾기 — yt-dlp가 ext 결정 (.webm / .mp4 / .m4a 등)
+    //    queue_tmp_dir/{item_id}.* glob → 첫 매치 반환
+    let entry = tokio::fs::read_dir(&tmp_dir).await
+        .map_err(|e| e.to_string())?
+        .next_entry().await
+        .ok()
+        .flatten()
+        .ok_or("다운로드 파일을 찾을 수 없어요.".to_string())?;
+    Ok(entry.path().to_string_lossy().to_string())
 }
 ```
 
 #### `cancel_queue_item`
 
+> **fix #3**: `kill_process_tree`는 setup.rs에 정의됨. queue.rs도 사용해야 하므로 **`common.rs §6 Process Helpers` 신규 섹션으로 이전** (translate_error와 함께 같은 리팩터). setup.rs 호출부는 `common::kill_process_tree(pid)`로 변경.
+
 ```rust
 #[tauri::command]
 pub async fn cancel_queue_item(
+    app: AppHandle,
     item_id: String,
     handle: State<'_, QueueHandle>,
-    app: AppHandle,
 ) -> Result<(), String> {
     let Some(pid) = handle.take(&item_id) else {
         return Ok(());  // 멱등성 — 이미 종료됨
     };
     common::dev_log(&app, &format!("queue:cancel_queue_item({}): kill PID {}", item_id, pid));
-    kill_process_tree(pid)?;
-    // tmp 파일 cleanup (best-effort)
-    let tmp_pattern = common::queue_tmp_dir(&app)?;
-    let _ = tokio::fs::remove_file(tmp_pattern.join(format!("{}.wav", item_id))).await;
+    common::kill_process_tree(pid)?;  // setup.rs에서 이전된 함수
+
+    // tmp 파일 cleanup (best-effort) — yt-dlp가 결정한 ext 모르므로 glob
+    let tmp_dir = common::queue_tmp_dir(&app)?;
+    if let Ok(mut entries) = tokio::fs::read_dir(&tmp_dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if let Some(name) = entry.file_name().to_str() {
+                if name.starts_with(&item_id) {
+                    let _ = tokio::fs::remove_file(entry.path()).await;
+                }
+            }
+        }
+    }
     Ok(())
 }
-
-// kill_process_tree는 setup.rs에서 이전 (translate_error와 함께)
-// 또는 setup.rs / queue 양쪽이 common::kill_process_tree 호출하도록 이전
 ```
 
 ### 4.3 Frontend Invoke Wrappers (src/lib/commands.ts 추가분)
@@ -648,11 +728,12 @@ export async function fetchVideoMetadata(itemId: string, path: string): Promise<
 export async function extractAudio(
   itemId: string,
   path: string,
+  durationSec: number,  // fix F: §4.2 시그니처 변경에 wrapper sync (frontend 캐시 → Rust 전달)
   onProgress: (p: ExtractProgress) => void,
 ): Promise<string> {
   const channel = new Channel<ExtractProgress>();
   channel.onmessage = onProgress;
-  return invoke<string>("extract_audio", { itemId, path, onProgress: channel });
+  return invoke<string>("extract_audio", { itemId, path, durationSec, onProgress: channel });
 }
 
 export async function fetchYoutubeMetadata(itemId: string, url: string): Promise<YoutubeMetadata> {
@@ -761,7 +842,12 @@ Svelte 5 컨벤션: 모든 컴포넌트 `$props()` / `$state()` / `$derived` 사
 - [ ] 처리 중 (downloading/extracting): 진행률 바 + step 텍스트 "다운로드 중..." 또는 "오디오 추출 중..."
 - [ ] 처리 중 [✕] 버튼 우측 표시 (FR-18 cancel)
 - [ ] 선택됨: `bg-accent/20` 하이라이트 (체크박스 미사용, Plan Convention)
+- [ ] hover: `bg-surface-hover` (또는 `bg-bg/50`) — 시각 피드백 (fix #12)
+- [ ] focus (키보드 navigation): `outline-2 outline-accent` (접근성)
 - [ ] 클릭: 선택 토글. Ctrl+클릭 = 추가/제거. Shift+클릭 = 범위.
+- [ ] **[✕] 버튼 동작 (Phase별)**:
+  - Phase 1: 모든 항목이 `pending` 상태 (Phase 2/3 미구현) → 단순 큐 제거
+  - Phase 2/3 도입 후: status에 따라 분기 — pending/error 항목은 즉시 제거, downloading/extracting은 cancel_queue_item 호출 후 제거 (FR-04 + FR-18 공유)
 
 #### 액션 바
 - [ ] 선택 0개: 액션 바 숨김
@@ -802,8 +888,8 @@ Svelte 5 컨벤션: 모든 컴포넌트 `$props()` / `$state()` / `$derived` 사
 ### 6.2 common::§5 Error Translation (신규)
 
 ```rust
-// common.rs §5 — Plan §10.2 결정으로 신규 추가, setup.rs translate_error 이전
-use std::collections::HashMap;
+// common.rs §5 — Plan §10.2 결정으로 신규 추가, setup.rs translate_error 이전.
+// (fix I: HashMap import 제거, 사용 안 함)
 
 pub enum ErrorContext {
     Setup,             // setup-page 호환 (기존 translate_error 동작)
@@ -815,25 +901,17 @@ pub enum ErrorContext {
 pub fn translate_error(raw: &str, ctx: ErrorContext) -> String {
     let lower = raw.to_lowercase();
 
-    // 1. Generic patterns (모든 컨텍스트 공유)
-    if lower.contains("no space left") {
-        return "저장 공간이 부족해요. 정리 후 다시 시도해주세요.".into();
-    }
-    if lower.contains("connection") || lower.contains("timeout") || lower.contains("dns") {
-        return "인터넷 연결이 끊겼어요. 다시 시도해주세요.".into();
-    }
-    if lower.contains("access denied") || lower.contains("permission") {
-        return "파일 쓰기 권한이 없어요.".into();
-    }
-
-    // 2. Context-specific patterns
+    // 1. Context-specific patterns FIRST (fix II: generic이 VideoExtract::timeout 등과 충돌하지 않도록)
     match ctx {
-        ErrorContext::Setup => {
-            if lower.contains("antivirus") || lower.contains("defender") {
-                return "백신 프로그램이 앱 파일을 차단하고 있어요. 예외 처리 후 다시 시도해주세요.".into();
+        ErrorContext::VideoExtract => {
+            if lower.contains("invalid data") || lower.contains("could not find codec") {
+                return "이 파일을 읽을 수 없어요. 손상된 영상일 수 있어요.".into();
+            }
+            if lower.contains("timeout") {
+                return "처리 시간이 너무 오래 걸려 중단했어요.".into();  // generic timeout보다 우선
             }
         }
-        ErrorContext::YoutubeDownload | ErrorContext::FetchMetadata => {
+        ErrorContext::YoutubeDownload => {
             if lower.contains("private video") || lower.contains("unavailable") {
                 return "이 영상은 비공개이거나 접근할 수 없어요.".into();
             }
@@ -844,14 +922,31 @@ pub fn translate_error(raw: &str, ctx: ErrorContext) -> String {
                 return "이 영상의 형식을 처리할 수 없어요.".into();
             }
         }
-        ErrorContext::VideoExtract => {
+        ErrorContext::FetchMetadata => {
+            // fix #7: FetchMetadata는 URL/file 구분 못 하므로 generic 외 추가 fallback만
             if lower.contains("invalid data") || lower.contains("could not find codec") {
-                return "이 파일을 읽을 수 없어요. 손상된 영상일 수 있어요.".into();
+                return "이 파일의 정보를 읽을 수 없어요.".into();
             }
-            if lower.contains("timeout") {
-                return "처리 시간이 너무 오래 걸려 중단했어요.".into();
+            if lower.contains("private video") || lower.contains("unavailable") {
+                return "이 영상은 비공개이거나 접근할 수 없어요.".into();
             }
         }
+        ErrorContext::Setup => {
+            if lower.contains("antivirus") || lower.contains("defender") {
+                return "백신 프로그램이 앱 파일을 차단하고 있어요. 예외 처리 후 다시 시도해주세요.".into();
+            }
+        }
+    }
+
+    // 2. Generic patterns (모든 컨텍스트 공유, context별 패턴 다음에 평가)
+    if lower.contains("no space left") {
+        return "저장 공간이 부족해요. 정리 후 다시 시도해주세요.".into();
+    }
+    if lower.contains("connection") || lower.contains("dns") {  // fix II: timeout 제거 (context별로 의미 다름)
+        return "인터넷 연결이 끊겼어요. 다시 시도해주세요.".into();
+    }
+    if lower.contains("access denied") || lower.contains("permission") {
+        return "파일 쓰기 권한이 없어요.".into();
     }
 
     // 3. Fallback: raw 그대로 반환 (UI에서 [상세] 토글 노출)
@@ -864,6 +959,24 @@ pub fn translate_error(raw: &str, ctx: ErrorContext) -> String {
 - 큐 항목 error: FileCard ❌ + 라벨 옆 message + [상세] 토글 (raw stderr)
 - 사용자 액션 안내: Toast (3초)
 - inline validation: UrlInput 하단 텍스트
+
+### 6.4 errorMessages.ts 패턴 추가 (fix #6)
+
+setup-page에서 도입된 `src/lib/errorMessages.ts` `translateToFriendlyMessage`는 frontend 2단 방어. queue-page는 다음 패턴 추가:
+
+```typescript
+// src/lib/errorMessages.ts에 추가
+const PATTERNS: Array<[RegExp, string]> = [
+  // ... setup-page 기존 패턴 (디스크/네트워크/권한/AV/취소) ...
+  // queue-page 추가 (fix #6)
+  [/private video|video unavailable|비공개/i, "이 영상은 비공개이거나 접근할 수 없어요."],
+  [/blocked in|not available in your/i, "이 영상은 현재 지역에서 접근할 수 없어요."],
+  [/requested format|format is not available/i, "이 영상의 형식을 처리할 수 없어요."],
+  [/invalid data|could not find codec|읽을 수 없어요/i, "이 파일을 읽을 수 없어요. 손상된 영상일 수 있어요."],
+];
+```
+
+Rust `translate_error`가 이미 한국어로 변환했으면 frontend는 그대로 통과 (한국어 키워드 detect → return as-is). 변환 안 된 raw error만 frontend에서 한 번 더 매칭.
 
 ---
 
@@ -925,7 +1038,7 @@ pub fn translate_error(raw: &str, ctx: ErrorContext) -> String {
 
 | # | Scenario | Steps | Success Criteria |
 |---|---|---|---|
-| 1 | YouTube URL 분리 흐름 | URL 붙여넣기 → 카드 등장 → metadata → 다운로드 → 추출 → ProcessPage placeholder 진입 | 전 흐름 에러 없음, 각 단계 progress UI 멈춤 0회 |
+| 1 | YouTube URL 분리 흐름 | URL 붙여넣기 → 카드 등장 → metadata → 다운로드 → 추출 → ProcessPage placeholder 진입 | 전 흐름 에러 없음. **Channel emit 간격 < 5초** (멈춰 보이지 않음, NFR Performance 측정 기준) (fix I) |
 | 2 | 영상 파일 분리 흐름 | .mp4 드롭 → ffprobe → 추출 → ProcessPage 진입 | 동일 |
 | 3 | 다중 항목 배치 | URL 2개 + .mp4 1개 → 모두 선택 → [▶ 분리 시작] | 3개 모두 ready-to-separate → ProcessPage |
 | 4 | 처리 중 cancel | 다운로드 50% 도중 [✕] | 좀비 0 (작업관리자 확인) + tmp 파일 정리 |
@@ -1035,10 +1148,12 @@ mr_extractor/
 ├── src-tauri/src/commands/
 │   ├── video.rs           (Phase 2 신규 본구현, ~300줄)
 │   ├── youtube.rs         (Phase 3 신규 본구현, ~350줄)
-│   ├── common.rs          (확장 — §1 queue_tmp_dir + §5 Error Translation)
-│   └── ... (setup.rs translate_error 호출부 수정)
+│   ├── queue.rs           (Phase 3 신규, ~80줄 — QueueHandle State + cancel_queue_item, fix A/B)
+│   ├── common.rs          (확장 — §1 queue_tmp_dir + §5 Error Translation + §6 Process Helpers, fix J/K/L)
+│   ├── mod.rs             (pub mod queue; 추가)
+│   └── ... (setup.rs translate_error / kill_process_tree 호출부 수정)
 ├── src-tauri/src/
-│   └── lib.rs             (QueueHandle 등록 + 5 신규 handler)
+│   └── lib.rs             (use commands::queue::QueueHandle; .manage(QueueHandle::default()); 5 신규 handler)
 └── src/
     ├── lib/
     │   ├── stores.ts      (queueStore + isProcessing + toastStore + navigateTo 시그니처 확장)
@@ -1065,7 +1180,13 @@ mr_extractor/
 3. **Phase 1 — UI primitives**: DropZone → UrlInput → FileCard → EmptyState 순
 4. **Phase 1 — QueuePage 조립**: 컴포넌트 합치기 + 단축키 listener + 액션 바 (분리 시작 disabled)
 5. **Phase 1 단독 검증** (`pnpm tauri dev`): URL/파일 추가 + 다중 선택 + 삭제 + 앱 재시작 hydrate
-6. **Phase 2 시작 — common 확장**: §1 queue_tmp_dir 추가 + §5 Error Translation (setup translate_error 이전, 호출부 수정)
+6. **Phase 2 시작 — common 확장 + setup 호환 리팩터** (fix #3 + fix #8):
+   a. `common.rs §1 Paths`에 `queue_tmp_dir(app)` 헬퍼 추가
+   b. `common.rs §5 Error Translation` 신규 섹션 + `ErrorContext` enum 4 variants
+   c. `common.rs §6 Process Helpers` 신규 섹션 + `kill_process_tree(pid)` 이전 (Windows taskkill, 기존 setup.rs 정의)
+   d. `setup.rs::translate_error` → `common::translate_error(raw, ErrorContext::Setup)` 호출부 변경
+   e. `setup.rs::kill_process_tree` → `common::kill_process_tree(pid)` 호출부 변경
+   f. **`cargo check` 0 warnings 검증** (setup-page Match Rate 회귀 방지) + 회귀 시 setup-page Analysis v0.4로 재기록 (fix N — 단순 호출부 변경이라 회귀 가능성 낮음)
 7. **Phase 2 — video.rs**: fetch_video_metadata (ffprobe JSON) → extract_audio (ffmpeg + Channel + cancel hook)
 8. **Phase 2 — frontend 통합**: commands.ts wrapper + FileCard에 진행률 emit → status 갱신
 9. **Phase 2 단독 검증**: 영상 .mp4 드롭 → 추출 진행 → ready-to-separate
@@ -1082,8 +1203,8 @@ mr_extractor/
 | Module | Scope Key | Description | Estimated Turns |
 |---|---|---|:-:|
 | Phase 1 — UI Shell + queueStore | `phase-1` | types + stores (queueStore + isProcessing + toastStore + navigateTo 확장) + queue.ts (normalize/classify/dedupe/add/remove) + Toast.svelte + DropZone/UrlInput/FileCard/EmptyState 4 components + QueuePage 조립 + 단축키 + ModelSelector slot reserve | 30~40 |
-| Phase 2 — Local File Pipeline | `phase-2` | common §1 queue_tmp_dir + common §5 Error Translation (setup translate_error 이전 + 호출부 수정) + video.rs (fetch_video_metadata + extract_audio + cancel hook) + commands.ts wrapper + FileCard 진행률 emit | 30~40 |
-| Phase 3 — YouTube + Cancel + Routing | `phase-3` | youtube.rs (fetch_youtube_metadata + download_youtube + friendly error) + QueueHandle State + cancel_queue_item + lib.rs handler 등록 + URL 정규화 통합 + ProcessPage 라우팅 (placeholder) | 25~35 |
+| Phase 2 — Local File Pipeline | `phase-2` | common §1 queue_tmp_dir + **common §5 Error Translation** + **common §6 Process Helpers** (kill_process_tree 이전, fix J/K/L) — setup translate_error / kill_process_tree 모두 호출부 수정 + cargo check 회귀 검증 + video.rs (fetch_video_metadata + extract_audio + cancel hook) + commands.ts wrapper + FileCard 진행률 emit | 30~40 |
+| Phase 3 — YouTube + Cancel + Routing | `phase-3` | **queue.rs (신규)** — QueueHandle State + cancel_queue_item + youtube.rs (fetch_youtube_metadata + download_youtube + friendly error) + lib.rs `use commands::queue::QueueHandle` + handler 등록 + URL 정규화 통합 + ProcessPage 라우팅 (placeholder) | 25~35 |
 
 #### Phase 의존성 그래프
 
@@ -1170,13 +1291,14 @@ pub struct QueueHandle(pub Mutex<HashMap<String, u32>>);
 **Phase 2**:
 - 영상 드롭 → ffprobe metadata 표시 → ffmpeg 추출 진행률 → ready-to-separate
 - corrupt video → "이 파일을 읽을 수 없어요" 토스트
-- 추출 도중 [✕] cancel → tmp 파일 정리
+- 처리 중 항목의 [✕]는 **단순 큐 제거** (cancel_queue_item은 Phase 3 도입, fix IV) — subprocess는 background 계속 (Phase 3에서 정리 인프라 도입)
+- common.rs §5/§6 리팩터 후 setup-page cargo check 0 warnings 회귀 없음
 
 **Phase 3**:
 - URL → metadata 5초 내 갱신 → 다운로드 → (영상이면) 추출 체이닝 → ready-to-separate
 - 비공개 URL → "이 영상은 비공개이거나..." 토스트
 - [▶ 분리 시작] → ProcessPage placeholder 진입 (실제 ProcessPage는 별도 피처)
-- 다운로드 도중 [✕] cancel → 좀비 0 (작업관리자 확인)
+- **추출/다운로드 도중 [✕] cancel → cancel_queue_item → tree kill → 좀비 0 + tmp cleanup** (fix IV — Phase 3 본구현)
 
 #### Recommended Session Plan
 
@@ -1192,9 +1314,10 @@ pub struct QueueHandle(pub Mutex<HashMap<String, u32>>);
 
 | Phase | Addressed SCs |
 |---|---|
-| Phase 1 | SC-1, SC-2 (file 부분), SC-3, SC-7, SC-8, SC-12, SC-13, SC-18, SC-20 (시각화 placeholder), SC-21 (model grep) |
-| Phase 2 | SC-4 (Phase 3와 함께), SC-9, SC-15, SC-20 (extracting), SC-2 (file metadata 갱신) |
-| Phase 3 | SC-5, SC-6, SC-10, SC-11, SC-14, SC-16, SC-17, SC-19, SC-20 (downloading) |
+| Phase 1 | SC-1, SC-2 (file 부분), SC-3, SC-7, SC-8, SC-12, SC-13, SC-18, SC-20 (placeholder), SC-21 |
+| Phase 2 | SC-2 (file metadata 갱신), SC-4 (Phase 3와 함께), SC-9, SC-15, SC-20 (extracting) |
+| Phase 3 | SC-5, SC-6, SC-14, SC-16, SC-17, SC-19, SC-20 (downloading) |
+| **모든 Phase** | **SC-10** (cargo check + pnpm build 회귀 없음, 각 phase 완료 시 검증), **SC-11** (UI 본문 한국어, 각 phase 완료 시 grep 검증), SC-17 일부 (cancel 인프라는 Phase 3에 본구현이지만 Phase 2에 PID 등록 hook은 미리 추가 — fix III) |
 
 ---
 
@@ -1203,3 +1326,6 @@ pub struct QueueHandle(pub Mutex<HashMap<String, u32>>);
 | Version | Date | Changes | Author |
 |---|---|---|---|
 | 0.1 | 2026-04-29 | Initial draft. Option C (Pragmatic) 사용자 승인. Plan v0.6 완전 흡수. 11 sections, Module Map 3 modules + 단독 완료 조건 + Phase 의존성 그래프 + SC↔Phase 매핑 + Interface Contract per phase. | rhino-ty |
+| 0.2 | 2026-04-29 | Iteration 1 self-review fix (12건). ① extract_audio metadata 중복 호출 회피 (frontend가 duration_sec 캐시 후 인자 전달), ② download_youtube `todo!()` 제거 + spec/의사코드 작성, ③ kill_process_tree 위치 결정 (common.rs §6 Process Helpers 신규로 이전, setup.rs 호출부도 수정), ④ fetching-metadata status 사용 시점 명확화 (Data Flow 시나리오 A/B에서 status 전이 명시 + 영속화 sync skip 표시), ⑤ §4.1 cancel_queue_item inputs에 app 추가, ⑥ errorMessages.ts에 youtube/video 패턴 추가 (§6.4 신규), ⑦ ErrorContext::FetchMetadata 분기 명확화 (URL/file generic만), ⑧ §11.2 setup.rs 호환 리팩터 단계 분리 (a~f) + cargo check 검증 명시, ⑨ FileCard [✕] Phase별 동작 명확화 (Phase 1=단순 제거, Phase 2/3=cancel 후 제거), ⑩ fetch_video_metadata 10s timeout 정당화, ⑪ Toast.id `crypto.randomUUID()` 명시, ⑫ FileCard hover/focus 시각 처리 추가. | rhino-ty |
+| 0.3 | 2026-04-29 | Iteration 2 fresh re-read fix (8건). **A/B** §2.1 `queue::cancel_queue_item` ↔ §11.1 file structure 모순 → **`queue.rs` 신규 파일 결정** + QueueHandle 위치 이전 (lib.rs → queue.rs), §3.1 + §11.1 + §2.1 다이어그램 모두 일관 갱신. **C** VideoMetadata.duration_sec docstring 정정 (Ok 시 항상 > 0). **F** §4.3 extractAudio wrapper 시그니처에 `durationSec` 추가 (v0.2 fix #1과 sync). **J/K/L** §11.3 Module Map / §11.2 / §2.1 / §11.1 / §2.3 모두 common §6 Process Helpers 추가 (kill_process_tree 위치 일관). **O** NavigatePayload model literal `"htdemucs_ft"`에 v1.1 ModelId union 확장 코멘트. **N** setup-page Analysis 회귀 처리 명시 (단순 호출부 변경이라 회귀 가능성 낮음). **I** L3 #1 측정 기준 모호 → "Channel emit 간격 < 5초" 명시. | rhino-ty |
+| **0.4** | 2026-04-29 | **Iteration 3 stability check fix (6건) — Design 안정화 완료**. **I** §6.2 unused `use std::collections::HashMap;` 제거. **II** §6.2 generic timeout 패턴이 VideoExtract::timeout과 충돌 → context-specific 패턴을 generic 앞으로 이동 + generic에서 timeout 제거. **III** §11.3 SC 매핑 정정: SC-10/SC-11 모든 phase 적용, SC-17 Phase 2 PID hook + Phase 3 cancel 본구현 분리. **IV** §11.3 Phase 2 단독 완료 조건의 `[✕] cancel` → "단순 큐 제거"로 변경 (cancel_queue_item은 Phase 3 도입), 진짜 cancel은 Phase 3 단독 완료 조건으로 이동. **V** §4.2 download_youtube `regex::Regex` 의존 → `String::find` 기반 simple parse로 변경 (Cargo.toml 신규 의존 0). **VI** §4.2 fetch_video_metadata `use` 구문 명시. **다음 단계**: `/pdca do queue-page --scope phase-1` 진입 가능. | rhino-ty |
