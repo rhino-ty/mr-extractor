@@ -91,6 +91,12 @@
       "skillPath": "plugins/reverse-engineering/skills/anti-reversing-techniques/SKILL.md",
       "computedHash": "2457a4ef45870d7f07211b78c92235574bb4946699989e14fc32dccca5ab7a90"
     },
+    "apca-contrast": {
+      "source": "rhino-ty/apca-contrast-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "8b03722c0d09f06304721a99240c06938946523620e4f37c498eda3cfbacc4dc"
+    },
     "api-design-principles": {
       "source": "wshobson/agents",
       "sourceType": "github",
@@ -1279,6 +1285,12 @@
       "skillPath": ".claude/skills/kafka-development-practices/SKILL.md",
       "computedHash": "557dc7102a8f12043aba6a74e493caee88e51e1a67bb57314f7e98648e49865f"
     },
+    "karpathy-guidelines": {
+      "source": "rhino-ty/andrej-karpathy-skills",
+      "sourceType": "github",
+      "skillPath": "skills/karpathy-guidelines/SKILL.md",
+      "computedHash": "0ec1641120accbb458780e0bd19a50a4182f2b97863e90851b91307f29802c9f"
+    },
     "knowledge-graph": {
       "source": "oimiragieo/agent-studio",
       "sourceType": "github",
@@ -1722,6 +1734,12 @@
       "sourceType": "github",
       "skillPath": ".claude/skills/prd-generator/SKILL.md",
       "computedHash": "fd0c393f124b722a6bf85f46509b9473f3ee62dfcb2878c5440d10100bf58815"
+    },
+    "principled-git-commit": {
+      "source": "rhino-ty/principled-git-commit",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "cd4c706a13d978c9ee9dd0b159ba20f5440637a07a050ed8abc7b1ed66b55d92"
     },
     "prioritize-python-3-10-features": {
       "source": "oimiragieo/agent-studio",
