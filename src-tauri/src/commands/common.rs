@@ -2,10 +2,12 @@
 // Plan SC-13 경계: setup-page는 기본 모델만 보장, 추가 모델은 common::probe_url_size 재사용하는 ModelSelector 책임.
 //
 // 섹션:
-//   § 1. Paths      — sidecar / app-data / venv / torch-cache / setup-marker
-//   § 2. Probing    — pypi wheel size / HEAD content-length
-//   § 3. Disk       — dir_size / check_disk_space / estimate_install_size
-//   § 4. Subprocess — python subprocess 환경변수 주입
+//   § 1. Paths            — sidecar / app-data / venv / torch-cache / setup-marker / queue-tmp
+//   § 2. Probing          — pypi wheel size / HEAD content-length
+//   § 3. Disk             — dir_size / check_disk_space / estimate_install_size
+//   § 4. Subprocess       — python subprocess 환경변수 주입
+//   § 5. Error Translation — raw 에러 → 한국어 친절 메시지 (queue-page Phase 2 추가)
+//   § 6. Process Helpers   — kill_process_tree (queue-page Phase 2 추가, setup.rs에서 이전)
 //
 // 의존 역전 (Design §9.2): common은 AppHandle + std/tokio/reqwest/sysinfo 만 의존. 다른 commands::* import 금지.
 //
@@ -113,6 +115,12 @@ pub fn torch_checkpoints_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// .setup-complete 마커 파일 (멱등성 힌트. 진실의 원천은 health check — Design §7).
 pub fn setup_marker_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join(".setup-complete"))
+}
+
+/// queue-page Phase 2 신규 — `%APPDATA%/com.rhinoty.mr-extractor/queue-tmp/`.
+/// Plan FR-10 / Design §3 — 다운로드/추출 임시 파일 위치. uninstall 시 삭제는 v1.2 app-lifecycle 이관.
+pub fn queue_tmp_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("queue-tmp"))
 }
 
 /// 번들된 Embedded Python 경로.
@@ -402,4 +410,106 @@ pub fn python_env_vars(app: &AppHandle) -> Result<Vec<(String, String)>, String>
         ("PYTHONUNBUFFERED".into(), "1".into()),
         ("PATH".into(), path_val),
     ])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// § 5. Error Translation — raw 에러 → 한국어 친절 메시지 (queue-page Phase 2 신규)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Design Ref: §6.2 — setup.rs::translate_error에서 이전. ErrorContext로 호출 위치별 분기.
+// queue-page Phase 2/3에서 video.rs / youtube.rs 모두 사용. setup.rs 호출부는
+// `translate_error(msg, ErrorContext::Setup)`로 마이그레이션 (fix #3 / fix N).
+//
+// 패턴 평가 순서 (fix II): context-specific FIRST, generic SECOND, raw fallback LAST.
+
+pub enum ErrorContext {
+    Setup,
+    YoutubeDownload,
+    VideoExtract,
+    FetchMetadata,
+}
+
+pub fn translate_error(raw: &str, ctx: ErrorContext) -> String {
+    let lower = raw.to_lowercase();
+
+    // 1. Context-specific patterns FIRST
+    match ctx {
+        ErrorContext::VideoExtract => {
+            if lower.contains("invalid data") || lower.contains("could not find codec") {
+                return "이 파일을 읽을 수 없어요. 손상된 영상일 수 있어요.".into();
+            }
+            if lower.contains("timeout") {
+                return "처리 시간이 너무 오래 걸려 중단했어요.".into();
+            }
+        }
+        ErrorContext::YoutubeDownload => {
+            if lower.contains("private video") || lower.contains("unavailable") {
+                return "이 영상은 비공개이거나 접근할 수 없어요.".into();
+            }
+            if lower.contains("not available in your") || lower.contains("blocked in") {
+                return "이 영상은 현재 지역에서 접근할 수 없어요.".into();
+            }
+            if lower.contains("requested format") {
+                return "이 영상의 형식을 처리할 수 없어요.".into();
+            }
+        }
+        ErrorContext::FetchMetadata => {
+            if lower.contains("invalid data") || lower.contains("could not find codec") {
+                return "이 파일의 정보를 읽을 수 없어요.".into();
+            }
+            if lower.contains("private video") || lower.contains("unavailable") {
+                return "이 영상은 비공개이거나 접근할 수 없어요.".into();
+            }
+        }
+        ErrorContext::Setup => {
+            if lower.contains("antivirus") || lower.contains("defender") {
+                return "백신 프로그램이 앱 파일을 차단하고 있어요. 예외 처리 후 다시 시도해주세요.".into();
+            }
+        }
+    }
+
+    // 2. Generic patterns (모든 컨텍스트 공유)
+    if lower.contains("no space left") {
+        return "저장 공간이 부족해요. 정리 후 다시 시도해주세요.".into();
+    }
+    if lower.contains("connectionerror") || lower.contains("connect") || lower.contains("dns") {
+        return "인터넷 연결이 끊겼어요. 다시 시도해주세요.".into();
+    }
+    if (lower.contains("access") && lower.contains("deni")) || lower.contains("permission") {
+        return "파일 쓰기 권한이 없어요. 관리자 권한으로 실행하거나 백신 예외에 추가해주세요.".into();
+    }
+
+    // 3. Fallback: raw 그대로 반환 (UI [상세] 토글)
+    raw.to_string()
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// § 6. Process Helpers — Subprocess 트리 종료 (queue-page Phase 2 신규)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Design Ref: §11.2 step 6c — setup.rs::kill_process_tree에서 이전.
+// queue-page Phase 3 cancel_queue_item + setup-page cancel_install이 공유.
+// Plan §2.2 Out of Scope: macOS/Linux는 v2 백로그.
+
+#[cfg(windows)]
+pub fn kill_process_tree(pid: u32) -> Result<(), String> {
+    let output = std::process::Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .output()
+        .map_err(|e| format!("프로세스 종료 실패: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.contains("not found") && !stderr.contains("찾을 수 없") {
+            return Err(format!("taskkill 실패: {}", stderr.trim()));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn kill_process_tree(pid: u32) -> Result<(), String> {
+    let _ = std::process::Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .output();
+    Ok(())
 }

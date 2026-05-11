@@ -476,7 +476,7 @@ pub async fn install_dependencies(
         // Plan §11.2: 부분 설치 rollback. venv가 깨지면 통째 삭제하여 다음 시도 깨끗하게.
         let _ = rollback_on_failure(&app).await;
         // 사용자 친화 메시지로 1차 매핑 (frontend errorMessages.ts가 2차 방어)
-        return Err(translate_error(msg));
+        return Err(common::translate_error(msg, common::ErrorContext::Setup));
     }
     result
 }
@@ -983,25 +983,8 @@ async fn rollback_on_failure(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Plan SC-8 + Design §6.2: Rust raw 에러 → 한국어 친절 메시지 1차 매핑.
-/// Phase 3에서 errorMessages.ts로 분리될 예정. 우선 Rust 측에서 패턴 매칭.
-fn translate_error(raw: &str) -> String {
-    let lower = raw.to_lowercase();
-    if lower.contains("no space left") {
-        return "저장 공간이 부족해요. 정리 후 다시 시도해주세요.".into();
-    }
-    if lower.contains("connectionerror") || lower.contains("timeout") || lower.contains("connect") {
-        return "인터넷 연결이 끊겼어요. 다시 시도해주세요.".into();
-    }
-    if lower.contains("access") && lower.contains("deni") || lower.contains("permission") {
-        return "파일 쓰기 권한이 없어요. 관리자 권한으로 실행하거나 백신 예외에 추가해주세요.".into();
-    }
-    if lower.contains("antivirus") || lower.contains("defender") {
-        return "백신 프로그램이 앱 파일을 차단하고 있어요. 예외 처리 후 다시 시도해주세요.".into();
-    }
-    // 기본값: 원본을 그대로 반환 (UI의 [상세] 토글에서만 노출)
-    raw.to_string()
-}
+// translate_error는 queue-page Phase 2에서 commands::common §5로 이전됨.
+// 호출부는 common::translate_error(raw, common::ErrorContext::Setup) 사용.
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Phase 3 commands (실구현)
@@ -1081,33 +1064,10 @@ pub async fn cancel_install(handle: State<'_, InstallHandle>) -> Result<(), Stri
     let Some(pid) = handle.take_pid() else {
         return Ok(()); // 진행 중인 작업 없음 — 멱등성
     };
-    kill_process_tree(pid)
+    common::kill_process_tree(pid)
 }
 
-#[cfg(windows)]
-fn kill_process_tree(pid: u32) -> Result<(), String> {
-    let output = std::process::Command::new("taskkill")
-        .args(["/F", "/T", "/PID", &pid.to_string()])
-        .output()
-        .map_err(|e| format!("프로세스 종료 실패: {}", e))?;
-    if !output.status.success() {
-        // 이미 종료된 PID는 에러 — 무시 가능.
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.contains("not found") && !stderr.contains("찾을 수 없") {
-            return Err(format!("taskkill 실패: {}", stderr.trim()));
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn kill_process_tree(pid: u32) -> Result<(), String> {
-    // Plan §2.2 Out of Scope: macOS/Linux는 v2 백로그. fallback으로 단일 kill.
-    let _ = std::process::Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .output();
-    Ok(())
-}
+// kill_process_tree는 queue-page Phase 2에서 commands::common §6로 이전됨.
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Dev Logging API — debug 빌드 전용. release 빌드엔 컴파일 자체에서 제외됨.
