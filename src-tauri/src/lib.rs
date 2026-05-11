@@ -4,6 +4,7 @@ mod commands;
 
 use commands::{setup, youtube, separate, video, export};
 use commands::setup::InstallHandle;
+use commands::queue::{self, QueueHandle};  // queue-page Phase 2 (Design §11.3) + Phase 3 cancel
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -19,7 +20,18 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         // State (Design §6.3 — install_dependencies <-> cancel_install 공유)
         .manage(InstallHandle::default())
-        // Commands (Design §4.1 Command List + Phase 3 추가: check_disk_space)
+        // queue-page Phase 2 — extract_audio 등이 PID hook 등록. Phase 3에서 cancel_queue_item 사용.
+        .manage(QueueHandle::default())
+        // Iterate 1 (I-1) — Plan NFR Reliability / SC-9: startup orphan tmp cleanup (24h grace).
+        // 백그라운드 task로 실행 — 실패가 앱 시작을 막지 않음 (silent).
+        .setup(|app| {
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                queue::cleanup_orphan_tmp_files(handle).await;
+            });
+            Ok(())
+        })
+        // Commands (Design §4.1 Command List)
         .invoke_handler(tauri::generate_handler![
             setup::check_environment,
             setup::install_dependencies,
@@ -32,9 +44,12 @@ pub fn run() {
             setup::clear_setup_log,
             #[cfg(debug_assertions)]
             setup::setup_log_path,
-            youtube::download_youtube,
+            youtube::download_youtube,             // queue-page Phase 3
+            youtube::fetch_youtube_metadata,        // queue-page Phase 3
+            queue::cancel_queue_item,               // queue-page Phase 3
             separate::separate_audio,
             video::extract_audio,
+            video::fetch_video_metadata,            // queue-page Phase 2
             export::export_mix,
         ])
         .run(tauri::generate_context!())

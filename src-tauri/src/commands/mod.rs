@@ -5,3 +5,4 @@ pub mod youtube;
 pub mod separate;
 pub mod video;
 pub mod export;
+pub mod queue;  // queue-page Phase 2 — QueueHandle State (Phase 3 cancel_queue_item 추가 예정)
