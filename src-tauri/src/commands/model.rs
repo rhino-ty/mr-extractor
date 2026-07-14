@@ -78,13 +78,17 @@ fn checkpoints_th_count(app: &AppHandle) -> u32 {
 }
 
 fn is_installed(app: &AppHandle, model: &str) -> bool {
+    let th_count = checkpoints_th_count(app);
     // htdemucs_ft(Bag of 4)는 setup-page가 설치 — checkpoints ≥ 4로 판정 (probe_model 일관)
-    if model == "htdemucs_ft" && checkpoints_th_count(app) >= 4 {
-        return true;
+    if model == "htdemucs_ft" {
+        return th_count >= 4;
     }
-    model_marker_path(app, model)
-        .map(|p| p.exists())
-        .unwrap_or(false)
+    // marker + 체크포인트 실존 확인 — 외부에서 torch-cache를 비운 stale marker 방지
+    // (체크포인트 파일명이 해시 기반이라 모델별 정밀 매칭은 불가, code-analyzer fix)
+    th_count >= 1
+        && model_marker_path(app, model)
+            .map(|p| p.exists())
+            .unwrap_or(false)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

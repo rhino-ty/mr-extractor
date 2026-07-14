@@ -71,6 +71,39 @@ const DISCOVER_MAX_DEPTH: u32 = 3;
 
 const STEM_NAMES: [&str; 4] = ["vocals", "drums", "bass", "other"];
 
+/// 분리 드라이버 (E2E 검증 완료 — 2026-07-14).
+/// `python -m demucs` CLI 대신 사용하는 이유: 신버전 torchaudio(≥2.9)의
+/// ta.save가 torchcodec을 요구해 CLI 저장 단계가 깨짐 → soundfile로 직접 저장.
+/// 출력 구조({out}/{model}/{track}/{stem}.wav)와 stdout "bag of N" 라인,
+/// stderr tqdm 포맷은 CLI와 동일하게 유지 — § 4/§ 5 파서 그대로 동작.
+/// 입력 로드는 demucs AudioFile(ffmpeg) — python_env_vars의 plain ffmpeg PATH 필요.
+const PY_DRIVER: &str = r#"
+import sys
+from pathlib import Path
+import torch
+from demucs.apply import BagOfModels, apply_model
+from demucs.audio import AudioFile
+from demucs.pretrained import get_model
+import soundfile as sf
+
+inp, out_dir, model_name = sys.argv[1], sys.argv[2], sys.argv[3]
+model = get_model(model_name)
+model.eval()
+n = len(model.models) if isinstance(model, BagOfModels) else 1
+print(f"Selected model is a bag of {n} models.", flush=True)
+wav = AudioFile(inp).read(streams=0, samplerate=model.samplerate, channels=model.audio_channels)
+ref = wav.mean(0)
+wav = (wav - ref.mean()) / (ref.std() + 1e-8)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+sources = apply_model(model, wav[None], device=device, shifts=1, split=True, overlap=0.25, progress=True)[0]
+sources = sources * (ref.std() + 1e-8) + ref.mean()
+out = Path(out_dir) / model_name / Path(inp).stem
+out.mkdir(parents=True, exist_ok=True)
+for name, src in zip(model.sources, sources):
+    sf.write(str(out / (name + ".wav")), src.cpu().numpy().T, model.samplerate, subtype="PCM_16")
+print("DONE", flush=True)
+"#;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // § 2. separate_audio — Tauri command 본체
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -118,15 +151,14 @@ pub async fn separate_audio(
         .map_err(|e| common::translate_error(&e.to_string(), ErrorContext::Separation))?;
     let out_dir = tmp_dir.join(&item_id);
 
+    // 드라이버 방식 (PY_DRIVER 주석 참조). 인자는 argv로만 전달 — 경로 인젝션 없음.
     let mut child = TokioCommand::new(&venv_py)
         .args([
-            "-m",
-            "demucs",
-            "-n",
-            &model,
-            "--out",
-            &out_dir.to_string_lossy(),
+            "-c",
+            PY_DRIVER,
             &file_path,
+            &out_dir.to_string_lossy(),
+            &model,
         ])
         .envs(env_vars)
         .stdout(Stdio::piped())

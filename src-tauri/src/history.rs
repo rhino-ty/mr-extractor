@@ -81,21 +81,42 @@ fn history_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(common::app_data_dir(app)?.join("history.json"))
 }
 
+/// 읽기 실패 구분 (code-analyzer Critical fix):
+///   - NotFound → 빈 히스토리 (정상)
+///   - 그 외 IO 에러 → Err 전파 (쓰기 경로가 기존 데이터를 빈 목록으로 덮어쓰지 않도록)
+///   - JSON 파손 → .corrupt로 백업 후 빈 히스토리로 재시작 (silent 소실 방지)
 async fn read_root(app: &AppHandle) -> Result<HistoryFileRoot, String> {
     let path = history_path(app)?;
     match tokio::fs::read_to_string(&path).await {
-        Ok(text) => Ok(serde_json::from_str(&text).unwrap_or_default()),
-        Err(_) => Ok(HistoryFileRoot::default()), // 파일 없음 = 빈 히스토리
+        Ok(text) => match serde_json::from_str(&text) {
+            Ok(root) => Ok(root),
+            Err(e) => {
+                common::dev_log(
+                    app,
+                    &format!("history:read_root: JSON 파손 — .corrupt 백업 후 초기화 ({})", e),
+                );
+                let backup = path.with_extension("json.corrupt");
+                let _ = tokio::fs::rename(&path, &backup).await;
+                Ok(HistoryFileRoot::default())
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HistoryFileRoot::default()),
+        Err(e) => Err(format!("히스토리를 읽을 수 없어요: {}", e)),
     }
 }
 
+/// 원자적 쓰기: tmp에 기록 후 rename (NTFS rename은 원자적 — 중단 시 파손 방지).
 async fn write_root(app: &AppHandle, root: &HistoryFileRoot) -> Result<(), String> {
     let path = history_path(app)?;
     if let Some(dir) = path.parent() {
         let _ = tokio::fs::create_dir_all(dir).await;
     }
     let text = serde_json::to_string_pretty(root).map_err(|e| e.to_string())?;
-    tokio::fs::write(&path, text)
+    let tmp = path.with_extension("json.tmp");
+    tokio::fs::write(&tmp, text)
+        .await
+        .map_err(|e| format!("히스토리를 저장할 수 없어요: {}", e))?;
+    tokio::fs::rename(&tmp, &path)
         .await
         .map_err(|e| format!("히스토리를 저장할 수 없어요: {}", e))
 }
@@ -124,8 +145,13 @@ fn inst_exists(files: &HistoryFiles) -> bool {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// 최신순 정렬 + 파일 존재 여부 계산 결과 반환.
+/// 쓰기와 동시 접근 시 일관성 보장을 위해 read도 lock (code-analyzer fix).
 #[tauri::command]
-pub async fn history_list(app: AppHandle) -> Result<Vec<HistoryEntryView>, String> {
+pub async fn history_list(
+    app: AppHandle,
+    lock: State<'_, HistoryLock>,
+) -> Result<Vec<HistoryEntryView>, String> {
+    let _g = lock.0.lock().await;
     let root = read_root(&app).await?;
     let mut views: Vec<HistoryEntryView> = root
         .entries

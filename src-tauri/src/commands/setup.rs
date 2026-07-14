@@ -322,7 +322,9 @@ async fn probe_python(app: &AppHandle, label: &str) -> EnvItem {
     }
 }
 
-/// Plan FR-09: `python -m demucs --help` 실행. 파일 존재만으론 부족 (AV 격리 감지).
+/// Plan FR-09: import 실행 health check. 파일 존재만으론 부족 (AV 격리 감지).
+/// soundfile 포함 — separate.rs 드라이버 의존성. 없으면 missing → 설치 플로우가
+/// pip_install("soundfile")로 자동 복구 (stale venv self-heal).
 async fn probe_demucs(app: &AppHandle, label: &str) -> EnvItem {
     let Ok(venv_py) = common::venv_python_path(app) else {
         return missing(label);
@@ -335,7 +337,7 @@ async fn probe_demucs(app: &AppHandle, label: &str) -> EnvItem {
     let run = tokio_timeout(
         Duration::from_secs(15),
         TokioCommand::new(&venv_py)
-            .args(["-m", "demucs", "--help"])
+            .args(["-c", "import demucs, soundfile"])
             .output(),
     )
     .await;
@@ -557,6 +559,21 @@ async fn install_inner(
         "음원 분리 엔진 설치 중...",
         50,
         55,
+        estimated_final_mb,
+    )
+    .await?;
+
+    // soundfile — 분리 결과 저장용 (process-page E2E: 신버전 torchaudio ta.save가
+    // torchcodec을 요구해 저장 실패 → separate.rs 드라이버가 soundfile로 직접 저장)
+    pip_install(
+        app,
+        "soundfile",
+        on_progress,
+        handle,
+        InstallPhase::InstallDemucs,
+        "음원 분리 엔진 설치 중...",
+        55,
+        58,
         estimated_final_mb,
     )
     .await?;

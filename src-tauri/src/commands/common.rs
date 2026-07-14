@@ -383,11 +383,35 @@ async fn probe_model_total_size() -> Option<u64> {
 // § 4. Subprocess — 환경 변수 주입 규칙 (Plan §8.2)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// demucs 내부 ffmpeg 폴백은 PATH에서 `ffmpeg`/`ffprobe` **plain 이름**을 찾는다.
+/// sidecar는 `ffmpeg-x86_64-pc-windows-msvc.exe`로 번들되므로 이름이 안 맞음
+/// (process-page E2E에서 발견) → plain 이름 복사본을 app_data/bin/에 1회 준비.
+pub fn ensure_plain_ffmpeg_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let bin_dir = app_data_dir(app)?.join("bin");
+    std::fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
+    let sidecar = sidecar_dir(app)?;
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    for name in ["ffmpeg", "ffprobe"] {
+        let dest = bin_dir.join(format!("{}{}", name, ext));
+        if dest.exists() {
+            continue;
+        }
+        let candidates = [
+            sidecar.join(format!("{}-x86_64-pc-windows-msvc.exe", name)),
+            sidecar.join(format!("{}{}", name, ext)),
+        ];
+        if let Some(src) = candidates.iter().find(|p| p.exists()) {
+            let _ = std::fs::copy(src, &dest);
+        }
+    }
+    Ok(bin_dir)
+}
+
 /// Python subprocess에 주입할 환경 변수 셋.
 ///   - TORCH_HOME        : 모델 캐시 리다이렉트 (~/.cache 오염 방지, FR-12)
 ///   - PIP_CACHE_DIR     : pip 캐시 격리
 ///   - PYTHONUNBUFFERED  : 진행률 stream 버퍼링 방지
-///   - PATH 선두에 ffmpeg sidecar dir prepend — demucs 내부 ffmpeg 폴백 대응
+///   - PATH 선두에 plain 이름 ffmpeg bin + sidecar dir prepend — demucs 폴백 대응
 ///
 /// Phase 2에서 실제 subprocess 실행 시 사용. Phase 1에서는 API 계약만 확정.
 pub fn python_env_vars(app: &AppHandle) -> Result<Vec<(String, String)>, String> {
@@ -398,7 +422,16 @@ pub fn python_env_vars(app: &AppHandle) -> Result<Vec<(String, String)>, String>
     // ffmpeg sidecar 디렉토리: dev/prod 모두에서 안정적으로 resolve (Analysis G-I2 fix).
     let ffmpeg_dir = sidecar_dir(app)?;
 
-    let mut path_val = ffmpeg_dir.to_string_lossy().to_string();
+    // plain 이름 bin이 최우선 — demucs가 `ffmpeg`를 즉시 찾도록
+    let mut path_val = match ensure_plain_ffmpeg_dir(app) {
+        Ok(bin) => {
+            let mut v = bin.to_string_lossy().to_string();
+            v.push(if cfg!(windows) { ';' } else { ':' });
+            v.push_str(&ffmpeg_dir.to_string_lossy());
+            v
+        }
+        Err(_) => ffmpeg_dir.to_string_lossy().to_string(),
+    };
     if let Ok(existing) = std::env::var("PATH") {
         path_val.push(if cfg!(windows) { ';' } else { ':' });
         path_val.push_str(&existing);
