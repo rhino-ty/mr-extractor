@@ -427,6 +427,8 @@ pub enum ErrorContext {
     YoutubeDownload,
     VideoExtract,
     FetchMetadata,
+    /// process-page Phase 2 — separate.rs (demucs) 전용 분기. Plan FR-09.
+    Separation,
 }
 
 pub fn translate_error(raw: &str, ctx: ErrorContext) -> String {
@@ -464,6 +466,25 @@ pub fn translate_error(raw: &str, ctx: ErrorContext) -> String {
         ErrorContext::Setup => {
             if lower.contains("antivirus") || lower.contains("defender") {
                 return "백신 프로그램이 앱 파일을 차단하고 있어요. 예외 처리 후 다시 시도해주세요.".into();
+            }
+        }
+        // process-page Phase 3 — Plan FR-09 친절 에러 매핑 4종 (+ 일반 Python 에러).
+        // 평가 순서: OOM → ImportError → 모델 캐시 미스 → 일반 traceback (fix II 순서 규칙).
+        ErrorContext::Separation => {
+            if lower.contains("out of memory") {
+                return "그래픽 카드 메모리가 부족해요. 더 작은 파일로 시도해 주세요.".into();
+            }
+            if lower.contains("importerror")
+                || lower.contains("modulenotfounderror")
+                || lower.contains("no module named")
+            {
+                return "음원 분리 엔진에 문제가 생겼어요. 설정 화면으로 돌아가 주세요.".into();
+            }
+            if lower.contains("no such file") || lower.contains("filenotfounderror") {
+                return "AI 모델을 찾을 수 없어요. 설정을 다시 확인해 주세요.".into();
+            }
+            if lower.contains("traceback") {
+                return "음원 분리 중 문제가 발생했어요. 다시 시도해 주세요.".into();
             }
         }
     }

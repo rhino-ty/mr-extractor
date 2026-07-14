@@ -105,6 +105,32 @@ export interface QueueItem {
   status: QueueItemStatus;
   errorDetail?: string;
   addedAt: string;
+  // process-page FR-14 — 분리 성공 시 4 stems 절대경로. PlayerPage가 읽어 로드.
+  // (FR-16의 progress?: {percent, step}는 기존 progress + step 필드가 이미 충족)
+  outputs?: StemOutputs;
+}
+
+// ─── Separation (process-page Phase 2, Rust: separate.rs) ───────────────────
+
+export interface StemOutputs {
+  vocals: string;
+  drums: string;
+  bass: string;
+  other: string;
+}
+
+export interface SeparationProgress {
+  itemId: string;
+  step: string;
+  percent: number;
+}
+
+export interface SeparationResult {
+  itemId: string;
+  vocals: string;
+  drums: string;
+  bass: string;
+  other: string;
 }
 
 // Design Ref: §3.1 — Rust Channel payload (Phase 2/3에서 호출)

@@ -8,6 +8,8 @@ import type {
   EnvStatus,
   ExtractProgress,
   InstallProgress,
+  SeparationProgress,
+  SeparationResult,
   VideoMetadata,
   YoutubeMetadata,
 } from "./types";
@@ -106,15 +108,27 @@ export async function cancelQueueItem(itemId: string): Promise<void> {
   return invoke<void>("cancel_queue_item", { itemId });
 }
 
-// ─── 후속 피처 placeholder (별도 피처에서 시그니처 확정) ─────────────────────
+// ─── process-page Phase 2 (Plan §2.1) ────────────────────────────────────────
 
+/// Plan FR-02/03/05 — demucs 분리 + Channel 진행률. 출력 위치는 Rust가
+/// `{queue-tmp}/{id}/`로 산출 (frontend가 경로를 알 필요 없음 — queue-page 일관).
 export async function separateAudio(
+  itemId: string,
   filePath: string,
   model: string,
-  outDir: string,
-): Promise<string> {
-  return invoke<string>("separate_audio", { filePath, model, outDir });
+  onProgress: (p: SeparationProgress) => void,
+): Promise<SeparationResult> {
+  const channel = new Channel<SeparationProgress>();
+  channel.onmessage = onProgress;
+  return invoke<SeparationResult>("separate_audio", {
+    itemId,
+    filePath,
+    model,
+    onProgress: channel,
+  });
 }
+
+// ─── 후속 피처 placeholder (별도 피처에서 시그니처 확정) ─────────────────────
 
 export async function exportMix(
   outputPath: string,
