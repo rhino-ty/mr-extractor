@@ -1,10 +1,12 @@
 // Design Ref: §2.3 -- Builder + 플러그인 등록 + 커맨드 등록
 
 mod commands;
+mod history;
 
 use commands::{setup, youtube, separate, video, export};
 use commands::setup::InstallHandle;
 use commands::queue::{self, QueueHandle};  // queue-page Phase 2 (Design §11.3) + Phase 3 cancel
+use history::HistoryLock;  // history-page — history.json read-modify-write 직렬화
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -22,6 +24,8 @@ pub fn run() {
         .manage(InstallHandle::default())
         // queue-page Phase 2 — extract_audio 등이 PID hook 등록. Phase 3에서 cancel_queue_item 사용.
         .manage(QueueHandle::default())
+        // history-page — history.json 동시 쓰기 직렬화
+        .manage(HistoryLock::default())
         // Iterate 1 (I-1) — Plan NFR Reliability / SC-9: startup orphan tmp cleanup (24h grace).
         // 백그라운드 task로 실행 — 실패가 앱 시작을 막지 않음 (silent).
         .setup(|app| {
@@ -51,6 +55,10 @@ pub fn run() {
             video::extract_audio,
             video::fetch_video_metadata,            // queue-page Phase 2
             export::export_mix,
+            history::history_list,                  // history-page
+            history::history_upsert,
+            history::history_set_export,
+            history::history_remove,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

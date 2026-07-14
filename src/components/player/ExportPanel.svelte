@@ -6,12 +6,8 @@
   import { get } from "svelte/store";
   import { slide } from "svelte/transition";
   import { open as shellOpen } from "@tauri-apps/plugin-shell";
-  import {
-    isPermissionGranted,
-    requestPermission,
-    sendNotification,
-  } from "@tauri-apps/plugin-notification";
-  import { exportMix } from "$lib/commands";
+  import { exportMix, historySetExport } from "$lib/commands";
+  import { notify } from "$lib/notify";
   import { pushToast } from "$lib/stores";
   import {
     STEM_ORDER,
@@ -43,20 +39,6 @@
     !mixer.stems.vocals.muted && mixer.stems.vocals.volume > 0,
   );
 
-  async function notifyDone(body: string): Promise<void> {
-    try {
-      let granted = await isPermissionGranted();
-      if (!granted) {
-        granted = (await requestPermission()) === "granted";
-      }
-      if (granted) {
-        sendNotification({ title: "내보내기 완료", body });
-      }
-    } catch {
-      // 알림 실패는 치명적이지 않음 — 토스트가 이미 안내
-    }
-  }
-
   async function runExport(): Promise<void> {
     if (exporting) return;
     exporting = true;
@@ -84,7 +66,12 @@
       );
       resultPath = path;
       pushToast("내보내기가 완료됐어요.", "success");
-      void notifyDone(path.split(/[\\/]/).pop() ?? path);
+      void notify("내보내기 완료", path.split(/[\\/]/).pop() ?? path);
+      // 히스토리에 산출물 경로 기록 (HISTORY.md files.wav/mp3, best-effort)
+      const itemId = get(loadedTrack).itemId;
+      if (itemId) {
+        void historySetExport(itemId, format, path).catch(() => {});
+      }
     } catch (err) {
       const msg = typeof err === "string" ? err : String(err);
       pushToast(msg, "error");

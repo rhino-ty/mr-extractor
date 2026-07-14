@@ -44,15 +44,31 @@
 
   function handleGlobalKeydown(e: KeyboardEvent): void {
     if (!(e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey)) return;
-    if (e.key.toLowerCase() !== "o") return;
     if (isTypingTarget(e.target)) return;
 
-    e.preventDefault();
-    // QueuePage가 자체 Ctrl+O를 처리하지 않도록 — 전역에서 처리. (QueuePage 로컬 핸들러 제거됨)
-    if (get(page) !== "queue") {
-      navigateTo("queue");
+    const key = e.key.toLowerCase();
+    if (key === "o") {
+      e.preventDefault();
+      // QueuePage가 자체 Ctrl+O를 처리하지 않도록 — 전역에서 처리. (QueuePage 로컬 핸들러 제거됨)
+      if (get(page) !== "queue") {
+        navigateTo("queue");
+      }
+      void openFileDialog();
+    } else if (key === "h") {
+      // SHORTCUTS.md — Ctrl+H 히스토리 토글
+      e.preventDefault();
+      if (get(page) === "history") {
+        goBack();
+      } else {
+        navigateTo("history");
+      }
+    } else if (e.key === ",") {
+      // SHORTCUTS.md — Ctrl+, 설정
+      e.preventDefault();
+      if (get(page) !== "settings") {
+        navigateTo("settings");
+      }
     }
-    void openFileDialog();
   }
 </script>
 

@@ -9,8 +9,50 @@
 
 import { get, writable, type Readable } from "svelte/store";
 import { queueStore, navigateTo, pushToast } from "./stores";
-import { separateAudio } from "./commands";
+import { historyUpsert, separateAudio } from "./commands";
 import { updateQueueItem } from "./queue";
+import { notify } from "./notify";
+import type { QueueItem, SeparationResult } from "./types";
+
+// ─── 히스토리 기록 (HISTORY.md — 분리 완료/실패 시 upsert, best-effort) ───────
+
+function dirname(path: string): string {
+  const idx = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  return idx > 0 ? path.slice(0, idx) : path;
+}
+
+function recordHistory(
+  item: QueueItem,
+  model: string,
+  result: SeparationResult | null,
+  errorMsg: string | null,
+): void {
+  void historyUpsert({
+    id: item.id,
+    date: new Date().toISOString(),
+    sourceType: item.sourceType,
+    source: item.source,
+    title: item.label,
+    model,
+    outDir: result ? dirname(result.vocals) : "",
+    files: {
+      wav: null,
+      mp3: null,
+      stems: result
+        ? {
+            vocals: result.vocals,
+            drums: result.drums,
+            bass: result.bass,
+            other: result.other,
+          }
+        : null,
+    },
+    status: result ? "done" : "error",
+    errorMsg,
+  }).catch((err) => {
+    console.warn("history upsert failed (non-fatal):", err);
+  });
+}
 
 // ─── 배치 상태 (goBack 재진입 시 pagePayload가 null이라 fallback으로 사용) ────
 // Plan FR-10: "재진입 시 같은 ids 사용". goBack()은 pagePayload를 비우므로
@@ -83,6 +125,8 @@ export async function startSeparationBatch(
             other: result.other,
           },
         });
+        recordHistory(item, model, result, null);
+        void notify("분리 완료", `「${item.label}」 스템이 준비됐어요.`);
 
         // FR-07 — 배치 첫 완료에만 자동 PlayerPage 진입
         if (!hasRouted) {
@@ -97,6 +141,7 @@ export async function startSeparationBatch(
           errorDetail: msg,
           step: undefined,
         });
+        recordHistory(item, model, null, msg);
         pushToast(msg, "error");
       }
     }

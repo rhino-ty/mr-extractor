@@ -9,6 +9,8 @@ import type {
   ExportFormat,
   ExportProgress,
   ExtractProgress,
+  HistoryEntry,
+  HistoryEntryView,
   InstallProgress,
   SeparationProgress,
   SeparationResult,
@@ -154,4 +156,32 @@ export async function exportMix(
     durationSec,
     onProgress: channel,
   });
+}
+
+// ─── history-page (history.rs — HISTORY.md) ──────────────────────────────────
+
+export async function historyList(): Promise<HistoryEntryView[]> {
+  return invoke<HistoryEntryView[]>("history_list");
+}
+
+/// 분리 완료/실패 시 process.ts가 호출. 같은 id는 교체 (재처리).
+export async function historyUpsert(entry: HistoryEntry): Promise<void> {
+  return invoke<void>("history_upsert", { entry });
+}
+
+/// 내보내기 완료 시 wav/mp3 산출물 경로 기록.
+export async function historySetExport(
+  id: string,
+  format: ExportFormat,
+  path: string,
+): Promise<void> {
+  return invoke<void>("history_set_export", { id, format, path });
+}
+
+/// 기록 삭제. deleteFiles=true면 스템/내보내기 파일도 함께 삭제.
+export async function historyRemove(
+  ids: string[],
+  deleteFiles: boolean,
+): Promise<void> {
+  return invoke<void>("history_remove", { ids, deleteFiles });
 }

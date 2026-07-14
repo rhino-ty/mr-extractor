@@ -148,6 +148,42 @@ export interface ExportProgress {
   percent: number;
 }
 
+// ─── History (history-page, Rust: history.rs — HISTORY.md JSON 구조) ─────────
+
+export interface HistoryStems {
+  vocals: string;
+  drums: string;
+  bass: string;
+  other: string;
+}
+
+export interface HistoryFiles {
+  wav: string | null;
+  mp3: string | null;
+  stems: HistoryStems | null;
+}
+
+export type HistoryStatus = "done" | "error";
+
+export interface HistoryEntry {
+  id: string;
+  date: string;
+  sourceType: QueueSourceType;
+  source: string;
+  title: string;
+  model: string;
+  outDir: string;
+  files: HistoryFiles;
+  status: HistoryStatus;
+  errorMsg: string | null;
+}
+
+/// history_list 응답 — 파일 존재 여부는 Rust가 일괄 계산 (뱃지 3종).
+export interface HistoryEntryView extends HistoryEntry {
+  stemsExist: boolean;
+  instExists: boolean;
+}
+
 // Design Ref: §3.1 — Rust Channel payload (Phase 2/3에서 호출)
 
 export interface VideoMetadata {
