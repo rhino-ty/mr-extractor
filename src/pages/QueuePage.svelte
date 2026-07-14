@@ -5,7 +5,7 @@
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
   import { fade } from "svelte/transition";
-  import { queueStore, isProcessing, navigateTo, pushToast } from "$lib/stores";
+  import { queueStore, isProcessing, navigateTo, pushToast, selectedModel } from "$lib/stores";
   import {
     classifyFile,
     removeFromQueue,
@@ -18,6 +18,7 @@
   import UrlInput from "../components/queue/UrlInput.svelte";
   import FileCard from "../components/queue/FileCard.svelte";
   import EmptyState from "../components/queue/EmptyState.svelte";
+  import ModelSelector from "../components/queue/ModelSelector.svelte";
 
   // ─── 선택 상태 (Plan FR-03) ──────────────────────────────────────────────
   let selectedIds = $state<Set<string>>(new Set());
@@ -124,8 +125,8 @@
       );
     if (readyIds.length === 0) return;
 
-    // Plan FR-05 / FR-19 — model literal "htdemucs_ft" 고정 (SC-21)
-    navigateTo("process", { kind: "process", ids: readyIds, model: "htdemucs_ft" });
+    // v1.1 ModelSelector — 선택된 모델 전달 (기본 htdemucs_ft)
+    navigateTo("process", { kind: "process", ids: readyIds, model: get(selectedModel) });
   }
 
   async function processItem(item: QueueItem): Promise<void> {
@@ -280,9 +281,9 @@
       <DropZone />
       <UrlInput />
     </div>
-    <!-- v1.1 ModelSelector 슬롯 (현재는 hidden, 영역만 reserve) -->
-    <div class="hidden" data-slot="model-selector">
-      <!-- v1.1 ModelSelector 슬롯 — htdemucs_ft 고정 -->
+    <!-- v1.1 ModelSelector (reserve 슬롯 본구현) -->
+    <div data-slot="model-selector">
+      <ModelSelector />
     </div>
   </div>
 

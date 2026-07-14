@@ -6,12 +6,18 @@ import { writable, derived, type Readable, type Writable } from "svelte/store";
 import { Store } from "@tauri-apps/plugin-store";
 import { exists } from "@tauri-apps/plugin-fs";
 import type {
+  ModelId,
   PageName,
   NavigatePayload,
   QueueItem,
   QueueItemStatus,
   Toast,
 } from "./types";
+
+// ─── Model Selection (model-selector v1.1) ──────────────────────────────────
+// MODEL_SELECTOR.md — 기본값 htdemucs_ft. QueuePage 드롭다운에서 변경.
+
+export const selectedModel: Writable<ModelId> = writable("htdemucs_ft");
 
 // ─── Page Navigation ─────────────────────────────────────────────────────────
 // Design Ref: §3.2 — navigateTo(page, payload?) 시그니처 확장

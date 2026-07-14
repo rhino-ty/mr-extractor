@@ -219,13 +219,27 @@ export interface Toast {
   durationMs: number;
 }
 
+// ─── Model (model-selector v1.1, Rust: model.rs) ────────────────────────────
+
+export type ModelId = "htdemucs" | "htdemucs_ft" | "htdemucs_6s";
+
+export interface ModelInfo {
+  id: ModelId;
+  installed: boolean;
+}
+
+export interface ModelDownloadProgress {
+  model: string;
+  step: string;
+  percent: number;
+}
+
 // ─── Navigation Payload (queue-page Phase 1, Design §3.2) ────────────────────
-// FR-19: model literal "htdemucs_ft" — Phase 3 시점엔 고정값.
-// v1.1 ModelSelector 도입 시 ModelId union으로 확장 (fix O).
+// v1.1 ModelSelector — model이 ModelId union으로 확장됨 (queue-page fix O 예정 반영).
 
 export type NavigatePayload =
   | { kind: "queue" }
-  | { kind: "process"; ids: string[]; model: "htdemucs_ft" }
+  | { kind: "process"; ids: string[]; model: ModelId }
   | { kind: "player"; itemId: string }
   | { kind: "history" }
   | { kind: "settings" }

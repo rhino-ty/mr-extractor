@@ -12,6 +12,8 @@ import type {
   HistoryEntry,
   HistoryEntryView,
   InstallProgress,
+  ModelDownloadProgress,
+  ModelInfo,
   SeparationProgress,
   SeparationResult,
   StemExportConfig,
@@ -184,4 +186,20 @@ export async function historyRemove(
   deleteFiles: boolean,
 ): Promise<void> {
   return invoke<void>("history_remove", { ids, deleteFiles });
+}
+
+// ─── model-selector v1.1 (model.rs — MODEL_SELECTOR.md) ──────────────────────
+
+export async function listModels(): Promise<ModelInfo[]> {
+  return invoke<ModelInfo[]>("list_models");
+}
+
+/// on-demand 모델 다운로드. torch.hub tqdm 진행률을 Channel로 스트리밍.
+export async function downloadModelByName(
+  model: string,
+  onProgress: (p: ModelDownloadProgress) => void,
+): Promise<void> {
+  const channel = new Channel<ModelDownloadProgress>();
+  channel.onmessage = onProgress;
+  return invoke<void>("download_model_by_name", { model, onProgress: channel });
 }

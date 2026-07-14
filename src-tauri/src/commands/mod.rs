@@ -6,3 +6,4 @@ pub mod separate;
 pub mod video;
 pub mod export;
 pub mod queue;  // queue-page Phase 2 — QueueHandle State (Phase 3 cancel_queue_item 추가 예정)
+pub mod model;  // model-selector v1.1 — 모델 목록 + on-demand 다운로드
