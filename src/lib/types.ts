@@ -133,6 +133,21 @@ export interface SeparationResult {
   other: string;
 }
 
+// ─── Export (player-page, Rust: export.rs) ──────────────────────────────────
+
+export type ExportFormat = "wav" | "mp3" | "flac";
+
+export interface StemExportConfig {
+  path: string;
+  volume: number; // 0.0 ~ 1.0
+  muted: boolean;
+}
+
+export interface ExportProgress {
+  step: string;
+  percent: number;
+}
+
 // Design Ref: §3.1 — Rust Channel payload (Phase 2/3에서 호출)
 
 export interface VideoMetadata {

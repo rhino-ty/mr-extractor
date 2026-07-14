@@ -22,6 +22,7 @@
   } from "$lib/audio";
   import WaveformPlayer from "../components/player/WaveformPlayer.svelte";
   import StemMixer from "../components/player/StemMixer.svelte";
+  import ExportPanel from "../components/player/ExportPanel.svelte";
 
   let track = $derived($loadedTrack);
   let playing = $derived($isPlaying);
@@ -212,5 +213,10 @@
         </button>
       {/if}
     </div>
+
+    <!-- 내보내기 (현재 믹스 + 키 조절 반영, ~/Desktop/MR Extractor/) -->
+    {#if track.outputs}
+      <ExportPanel outputs={track.outputs} />
+    {/if}
   {/if}
 </div>

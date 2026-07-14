@@ -6,10 +6,13 @@ import type {
   DiskCheck,
   DownloadProgress,
   EnvStatus,
+  ExportFormat,
+  ExportProgress,
   ExtractProgress,
   InstallProgress,
   SeparationProgress,
   SeparationResult,
+  StemExportConfig,
   VideoMetadata,
   YoutubeMetadata,
 } from "./types";
@@ -128,11 +131,27 @@ export async function separateAudio(
   });
 }
 
-// ─── 후속 피처 placeholder (별도 피처에서 시그니처 확정) ─────────────────────
+// ─── player-page 내보내기 (export.rs) ────────────────────────────────────────
 
+/// 현재 믹서 볼륨/뮤트 + 키 조절을 반영한 믹스다운.
+/// durationSec는 프론트 캐시 전달 (ffprobe 재호출 회피 — queue-page fix #1 패턴).
+/// 반환: 생성된 출력 파일 절대경로 (~/Desktop/MR Extractor/).
 export async function exportMix(
-  outputPath: string,
-  format: string,
+  title: string,
+  stems: StemExportConfig[],
+  format: ExportFormat,
+  semitones: number,
+  durationSec: number,
+  onProgress: (p: ExportProgress) => void,
 ): Promise<string> {
-  return invoke<string>("export_mix", { outputPath, format });
+  const channel = new Channel<ExportProgress>();
+  channel.onmessage = onProgress;
+  return invoke<string>("export_mix", {
+    title,
+    stems,
+    format,
+    semitones,
+    durationSec,
+    onProgress: channel,
+  });
 }

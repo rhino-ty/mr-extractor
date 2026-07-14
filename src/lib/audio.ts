@@ -47,6 +47,8 @@ export interface LoadedTrack {
   itemId: string | null;
   label: string;
   durationSec: number;
+  /** ready 상태에서만 존재 — ExportPanel이 스템 경로로 사용. */
+  outputs?: StemOutputs;
   error?: string;
 }
 
@@ -174,6 +176,7 @@ export async function loadItem(item: PlayableItem): Promise<void> {
       itemId: item.id,
       label: item.label,
       durationSec,
+      outputs,
     });
   } catch (err) {
     if (token !== loadToken) return;
