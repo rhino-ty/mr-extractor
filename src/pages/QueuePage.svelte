@@ -302,6 +302,8 @@
               selected={selectedIds.has(item.id)}
               onSelect={(e) => handleSelect(item, e)}
               onRemove={() => void removeFromQueue(item.id)}
+              onOpen={() =>
+                navigateTo("player", { kind: "player", itemId: item.id })}
             />
           </div>
         {/each}

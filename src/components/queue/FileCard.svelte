@@ -9,9 +9,11 @@
     selected: boolean;
     onSelect: (e: MouseEvent) => void;
     onRemove: () => void;
+    /// UX H1 — 완료 항목 [열기 →] (분리 결과가 있을 때만 표시)
+    onOpen?: () => void;
   }
 
-  let { item, selected, onSelect, onRemove }: Props = $props();
+  let { item, selected, onSelect, onRemove, onOpen }: Props = $props();
 
   const SOURCE_ICONS = {
     youtube: "🔗",
@@ -101,9 +103,22 @@
     {/if}
   </div>
 
+  {#if item.status === "done" && item.outputs && onOpen}
+    <button
+      type="button"
+      class="shrink-0 rounded-lg bg-success px-3 py-1.5 text-xs font-medium text-bg transition-colors duration-200 hover:bg-success/80"
+      title="믹서에서 열기"
+      onclick={(e) => {
+        e.stopPropagation();
+        onOpen();
+      }}
+    >
+      열기 →
+    </button>
+  {/if}
   <button
     type="button"
-    class="shrink-0 rounded-md p-1 text-muted transition-colors hover:bg-danger/20 hover:text-danger"
+    class="shrink-0 rounded-md p-1 text-muted transition-colors duration-200 hover:bg-danger/20 hover:text-danger"
     aria-label="삭제"
     onclick={handleRemoveClick}
   >

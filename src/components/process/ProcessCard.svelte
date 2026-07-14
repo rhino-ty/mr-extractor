@@ -107,6 +107,7 @@
     <button
       type="button"
       class="shrink-0 rounded-lg bg-success px-3 py-1.5 text-xs font-medium text-bg transition-colors duration-200 hover:bg-success/80"
+      title="믹서에서 열기"
       onclick={handleOpenClick}
     >
       열기 →

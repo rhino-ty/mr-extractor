@@ -19,6 +19,14 @@
   // 뒤로 버튼을 숨길 페이지 (메인 페이지들)
   const mainPages = new Set(["setup", "queue"]);
 
+  // UX M5 — 헤더에 현재 페이지 표시 (깊은 페이지에서 위치 인지)
+  const PAGE_LABELS: Record<string, string> = {
+    process: "음원 분리",
+    player: "플레이어",
+    history: "히스토리",
+    settings: "설정",
+  };
+
   const showBack = derived([page, pageHistory], ([$p, $h]) => {
     return !mainPages.has($p) && $h.length > 0;
   });
@@ -89,6 +97,9 @@
         </button>
       {/if}
       <h1 class="text-lg font-bold text-text">MR Extractor</h1>
+      {#if PAGE_LABELS[$page]}
+        <span class="text-sm text-muted">· {PAGE_LABELS[$page]}</span>
+      {/if}
     </div>
     <div class="flex items-center gap-2">
       <button

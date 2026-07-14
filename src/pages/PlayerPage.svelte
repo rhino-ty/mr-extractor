@@ -123,8 +123,16 @@
       </button>
     </div>
   {:else}
-    <!-- 타이틀 -->
-    <div class="flex items-center justify-between gap-3" in:fade={{ duration: 200 }}>
+    <!-- 타이틀 (UI.md 레이아웃 — ← 목록 + 곡 제목) -->
+    <div class="flex items-center gap-3" in:fade={{ duration: 200 }}>
+      <button
+        type="button"
+        class="shrink-0 rounded-lg border border-border px-3 py-1.5 text-sm text-muted transition-colors duration-200 hover:border-accent/40 hover:text-text"
+        title="큐로 돌아가기 (Escape)"
+        onclick={() => navigateTo("queue")}
+      >
+        ← 목록
+      </button>
       <h2 class="truncate text-xl font-bold text-text" title={track.label}>
         {track.label}
       </h2>

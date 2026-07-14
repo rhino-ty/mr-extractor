@@ -103,7 +103,7 @@
     <div class="flex items-center justify-between">
       <h2 class="text-xl font-bold text-text">음원 분리</h2>
       <span class="text-xs text-muted">
-        완료된 곡은 자동으로 열려요 · 나머지는 순서대로 계속 처리돼요
+        첫 곡이 완료되면 자동으로 열려요 · 나머지는 순서대로 계속 처리돼요
       </span>
     </div>
 

@@ -275,7 +275,7 @@
     class="fixed inset-0 z-50 flex items-center justify-center bg-bg/70"
     transition:fade={{ duration: 150 }}
   >
-    <div class="w-96 rounded-xl border border-border bg-surface p-5 shadow-xl">
+    <div class="w-96 rounded-xl border border-border bg-surface p-5 shadow-xl" role="dialog" aria-modal="true">
       <h3 class="text-sm font-semibold text-text">임시 파일 정리</h3>
       <p class="mt-2 text-sm text-muted">
         다운로드한 오디오와 분리된 스템 파일이 모두 삭제돼요. 플레이어에서 다시

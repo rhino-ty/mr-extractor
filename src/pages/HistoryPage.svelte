@@ -15,6 +15,8 @@
 
   let entries = $state<HistoryEntryView[]>([]);
   let loading = $state(true);
+  // UX M1 — 로드 실패를 빈 상태와 구분 (에러인데 "히스토리가 없어요"로 보이지 않게)
+  let loadError = $state(false);
   let selectedIds = $state<Set<string>>(new Set());
   let lastClickedId = $state<string | null>(null);
 
@@ -27,7 +29,9 @@
   async function reload(): Promise<void> {
     try {
       entries = await historyList();
+      loadError = false;
     } catch (err) {
+      loadError = true;
       pushToast(typeof err === "string" ? err : String(err), "error");
     } finally {
       loading = false;
@@ -175,6 +179,24 @@
           aria-hidden="true"
         ></div>
       </div>
+    {:else if loadError}
+      <div
+        class="flex h-full flex-col items-center justify-center gap-3 text-center"
+        in:fade={{ duration: 200 }}
+      >
+        <div class="text-5xl" aria-hidden="true">❌</div>
+        <p class="text-lg font-semibold text-text">히스토리를 불러올 수 없어요</p>
+        <button
+          type="button"
+          class="mt-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-colors duration-200 hover:bg-accent/80"
+          onclick={() => {
+            loading = true;
+            void reload();
+          }}
+        >
+          🔄 다시 시도
+        </button>
+      </div>
     {:else if entries.length === 0}
       <div
         class="flex h-full flex-col items-center justify-center gap-3 text-center"
@@ -227,7 +249,7 @@
     class="fixed inset-0 z-50 flex items-center justify-center bg-bg/70"
     transition:fade={{ duration: 150 }}
   >
-    <div class="w-96 rounded-xl border border-border bg-surface p-5 shadow-xl">
+    <div class="w-96 rounded-xl border border-border bg-surface p-5 shadow-xl" role="dialog" aria-modal="true">
       <h3 class="text-sm font-semibold text-text">
         {deleteTarget.length}개 항목 삭제
       </h3>

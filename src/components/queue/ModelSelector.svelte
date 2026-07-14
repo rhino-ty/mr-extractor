@@ -3,7 +3,7 @@
   // htdemucs_6s는 표시하되 비활성: 6s의 other.wav에는 기타/피아노가 빠져 있어
   // 현재 4-스템 믹서/내보내기로는 소리가 누락됨 → 6-스템 믹서 도입 시 활성화.
 
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { get } from "svelte/store";
   import { fade, slide } from "svelte/transition";
   import { selectedModel, pushToast } from "$lib/stores";
@@ -47,7 +47,26 @@
 
   onMount(() => {
     void refreshInstalled();
+    window.addEventListener("keydown", handleKeydown, true);
   });
+
+  onDestroy(() => {
+    window.removeEventListener("keydown", handleKeydown, true);
+  });
+
+  // UX M2 — SHORTCUTS.md "Escape = 모달/도움말 닫기" (capture로 QueuePage보다 먼저)
+  function handleKeydown(e: KeyboardEvent): void {
+    if (e.key !== "Escape") return;
+    if (confirmTarget) {
+      e.preventDefault();
+      e.stopPropagation();
+      confirmTarget = null;
+    } else if (helpOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      helpOpen = false;
+    }
+  }
 
   async function refreshInstalled(): Promise<void> {
     try {
@@ -174,7 +193,7 @@
     class="fixed inset-0 z-50 flex items-center justify-center bg-bg/70"
     transition:fade={{ duration: 150 }}
   >
-    <div class="w-96 rounded-xl border border-border bg-surface p-5 shadow-xl">
+    <div class="w-96 rounded-xl border border-border bg-surface p-5 shadow-xl" role="dialog" aria-modal="true">
       <h3 class="text-sm font-semibold text-text">
         {confirmTarget.name} 모델 다운로드
       </h3>

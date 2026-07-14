@@ -248,14 +248,14 @@
 <div class="relative flex h-full items-center justify-center p-6">
   {#if IS_DEV && logOpen}
     <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 p-6"
       role="dialog"
       aria-modal="true"
     >
       <div class="flex h-full max-h-[80vh] w-full max-w-[800px] flex-col gap-3 rounded-xl border border-border bg-surface p-4">
         <div class="flex items-center justify-between">
           <h2 class="text-sm font-semibold">📜 진단 로그</h2>
-          <button class="text-xs text-muted hover:text-white" onclick={() => (logOpen = false)}>✕ 닫기</button>
+          <button class="text-xs text-muted hover:text-text" onclick={() => (logOpen = false)}>✕ 닫기</button>
         </div>
         {#if logPath}
           <p class="break-all text-[11px] text-muted">파일: {logPath}</p>
@@ -338,13 +338,13 @@
 
         <div class="flex gap-2">
           <button
-            class="flex-1 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-semibold text-muted hover:bg-bg"
+            class="flex-1 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-semibold text-muted transition-colors duration-200 hover:bg-bg"
             onclick={declineInstall}
           >
             ✕ 닫기
           </button>
           <button
-            class="flex-1 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+            class="flex-1 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110"
             onclick={runInstall}
           >
             ✅ 설치 시작
@@ -392,10 +392,10 @@
           {/if}
         </div>
         <p class="text-center text-xs text-muted">
-          처음 실행 시 한 번만 설치됩니다. 인터넷 필요. (약 3~5분)
+          처음 실행 시 한 번만 설치돼요. 인터넷 연결이 필요해요. (약 3~5분)
         </p>
         <button
-          class="mx-auto rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-muted hover:bg-bg disabled:opacity-50"
+          class="mx-auto rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-muted transition-colors duration-200 hover:bg-bg disabled:opacity-50"
           disabled={canceling}
           onclick={handleCancel}
         >
@@ -416,7 +416,7 @@
         {/if}
         <div class="flex flex-col gap-2">
           <button
-            class="rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs text-muted hover:bg-bg"
+            class="rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs text-muted transition-colors duration-200 hover:bg-bg"
             onclick={() => (detailOpen = !detailOpen)}
           >
             {detailOpen ? "▲" : "▼"} 오류 상세 보기
@@ -440,7 +440,7 @@
           {/if}
         </div>
         <button
-          class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+          class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110"
           onclick={detect}
         >
           🔄 다시 시도
@@ -456,13 +456,13 @@
         </p>
         <div class="flex gap-2">
           <button
-            class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-semibold text-muted hover:bg-bg"
+            class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-semibold text-muted transition-colors duration-200 hover:bg-bg"
             onclick={declineInstall}
           >
             ✕ 닫기
           </button>
           <button
-            class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+            class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110"
             onclick={detect}
           >
             🔄 다시 확인
@@ -503,13 +503,13 @@
         </div>
         <div class="flex justify-center gap-2">
           <button
-            class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-semibold text-muted hover:bg-bg"
+            class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-semibold text-muted transition-colors duration-200 hover:bg-bg"
             onclick={declineInstall}
           >
             ✕ 닫기
           </button>
           <button
-            class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+            class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110"
             onclick={detect}
           >
             🔄 다시 확인
