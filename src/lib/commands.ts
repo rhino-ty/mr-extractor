@@ -17,6 +17,7 @@ import type {
   SeparationProgress,
   SeparationResult,
   StemExportConfig,
+  StorageStats,
   VideoMetadata,
   YoutubeMetadata,
 } from "./types";
@@ -202,4 +203,15 @@ export async function downloadModelByName(
   const channel = new Channel<ModelDownloadProgress>();
   channel.onmessage = onProgress;
   return invoke<void>("download_model_by_name", { model, onProgress: channel });
+}
+
+// ─── settings-page v1.2 (settings.rs — SETTINGS.md) ──────────────────────────
+
+export async function storageStats(): Promise<StorageStats> {
+  return invoke<StorageStats>("storage_stats");
+}
+
+/// queue-tmp 전체 정리. 반환: 확보된 MB. 분리 스템 포함 — 호출 전 경고 필수.
+export async function clearQueueTmp(): Promise<number> {
+  return invoke<number>("clear_queue_tmp");
 }

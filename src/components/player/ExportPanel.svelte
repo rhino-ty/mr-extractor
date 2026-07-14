@@ -8,6 +8,7 @@
   import { open as shellOpen } from "@tauri-apps/plugin-shell";
   import { exportMix, historySetExport } from "$lib/commands";
   import { notify } from "$lib/notify";
+  import { appSettings } from "$lib/settings";
   import { pushToast } from "$lib/stores";
   import {
     STEM_ORDER,
@@ -29,7 +30,8 @@
     { value: "flac", label: "FLAC", hint: "무손실 압축" },
   ];
 
-  let format = $state<ExportFormat>("wav");
+  // 기본 포맷은 설정 (SETTINGS.md 내보내기 포맷) — 패널 열 때 1회 반영
+  let format = $state<ExportFormat>(get(appSettings).defaultFormat);
   let exporting = $state(false);
   let percent = $state(0);
   let resultPath = $state<string | null>(null);

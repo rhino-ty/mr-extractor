@@ -4,6 +4,7 @@
   import { get } from "svelte/store";
   import { page, navigateTo, goBack, pageHistory, hydrateQueueStore } from "$lib/stores";
   import { openFileDialog } from "$lib/queue";
+  import { hydrateSettings } from "$lib/settings";
   import { fade } from "svelte/transition";
   import { derived } from "svelte/store";
 
@@ -22,9 +23,10 @@
     return !mainPages.has($p) && $h.length > 0;
   });
 
-  // Plan SC-7 — 앱 시작 시 큐 hydrate (파일 mismatch 자동 제거)
+  // Plan SC-7 — 앱 시작 시 큐 hydrate (파일 mismatch 자동 제거) + 설정 hydrate (v1.2)
   onMount(() => {
     void hydrateQueueStore();
+    void hydrateSettings();
     window.addEventListener("keydown", handleGlobalKeydown);
   });
 

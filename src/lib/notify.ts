@@ -5,9 +5,12 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { get } from "svelte/store";
+import { appSettings } from "./settings";
 
-/** 시스템 알림 (best-effort — 실패해도 앱 흐름에 영향 없음). */
+/** 시스템 알림 (best-effort — 실패해도 앱 흐름에 영향 없음). 설정 OFF면 skip. */
 export async function notify(title: string, body: string): Promise<void> {
+  if (!get(appSettings).notifyEnabled) return;
   try {
     let granted = await isPermissionGranted();
     if (!granted) {

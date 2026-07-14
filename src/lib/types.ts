@@ -184,6 +184,16 @@ export interface HistoryEntryView extends HistoryEntry {
   instExists: boolean;
 }
 
+// ─── Settings (settings-page v1.2, Rust: settings.rs) ───────────────────────
+
+export interface StorageStats {
+  appDataMb: number;
+  queueTmpMb: number;
+  modelCacheMb: number;
+  outputDir: string;
+  outputMb: number;
+}
+
 // Design Ref: §3.1 — Rust Channel payload (Phase 2/3에서 호출)
 
 export interface VideoMetadata {

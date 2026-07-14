@@ -3,7 +3,7 @@
 mod commands;
 mod history;
 
-use commands::{setup, youtube, separate, video, export, model};
+use commands::{setup, youtube, separate, video, export, model, settings};
 use commands::setup::InstallHandle;
 use commands::queue::{self, QueueHandle};  // queue-page Phase 2 (Design §11.3) + Phase 3 cancel
 use history::HistoryLock;  // history-page — history.json read-modify-write 직렬화
@@ -61,6 +61,8 @@ pub fn run() {
             history::history_remove,
             model::list_models,                     // model-selector v1.1
             model::download_model_by_name,
+            settings::storage_stats,                // settings-page v1.2
+            settings::clear_queue_tmp,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
