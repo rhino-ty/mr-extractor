@@ -358,3 +358,58 @@ fn parse_ffmpeg_time(token: &str) -> Option<u32> {
     };
     Some(total as u32)
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tests — 필터 그래프 / 피치 / 파일명 (E2E 검증 필터 문자열 기준: 2026-07-14)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stem(path: &str, volume: f32, muted: bool) -> StemConfig {
+        StemConfig { path: path.into(), volume, muted }
+    }
+
+    #[test]
+    fn filter_graph_without_pitch_maps_to_out() {
+        let stems = [stem("a.wav", 1.0, false), stem("b.wav", 0.7, false)];
+        let audible: Vec<&StemConfig> = stems.iter().collect();
+        let f = build_filter_graph(2, &audible, 0, false);
+        assert_eq!(
+            f,
+            "[0:a]volume=1.000[a0];[1:a]volume=0.700[a1];[a0][a1]amix=inputs=2:normalize=0[out]"
+        );
+    }
+
+    #[test]
+    fn filter_graph_with_rubberband_pitch() {
+        let stems = [stem("a.wav", 1.0, false)];
+        let audible: Vec<&StemConfig> = stems.iter().collect();
+        let f = build_filter_graph(1, &audible, 2, true);
+        // +2반음 = 2^(2/12) ≈ 1.122462
+        assert!(f.ends_with("[m];[m]rubberband=pitch=1.122462[out]"), "{}", f);
+    }
+
+    #[test]
+    fn pitch_fallback_atempo_stays_in_range() {
+        // ±12반음에서 atempo 인자가 0.5~2.0 범위 내 (ffmpeg 제약)
+        let down12 = pitch_filter(-12, false);
+        assert!(down12.contains("atempo=2.000000"), "{}", down12);
+        let up12 = pitch_filter(12, false);
+        assert!(up12.contains("atempo=0.500000"), "{}", up12);
+    }
+
+    #[test]
+    fn sanitize_title_strips_forbidden_chars() {
+        assert_eq!(sanitize_title(r#"소란: 사랑/한? "마음""#), "소란 사랑 한 마음");
+        assert_eq!(sanitize_title("   "), "MR");
+    }
+
+    #[test]
+    fn ffmpeg_time_parses() {
+        assert_eq!(parse_ffmpeg_time("00:01:23.45"), Some(83));
+        assert_eq!(parse_ffmpeg_time("12.5"), Some(12));
+        assert_eq!(parse_ffmpeg_time("bogus"), None);
+    }
+}

@@ -472,3 +472,50 @@ async fn cleanup_out_dir(app: &AppHandle, out_dir: &Path, item_id: &str) {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tests — 진행률 파서 (E2E 실측 출력 기반: 2026-07-14 drv_stderr.log 샘플)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tqdm_percent_parses_real_bar() {
+        // 실측: ` 50%|#####...| 5.85/11.7 [00:04<00:04,  1.38seconds/s]`
+        assert_eq!(
+            parse_tqdm_percent("50%|#####################| 5.85/11.7 [00:04<00:04,  1.38seconds/s]"),
+            Some(50)
+        );
+        assert_eq!(parse_tqdm_percent("0%|          | 0.0/11.7 [00:00<?, ?seconds/s]"), Some(0));
+        assert_eq!(parse_tqdm_percent("100%|######| 11.7/11.7"), Some(100));
+    }
+
+    #[test]
+    fn tqdm_percent_ignores_plain_percent_text() {
+        // `%|` 마커 없는 일반 텍스트의 %는 진행률 아님 (에러 라인 오인 방지)
+        assert_eq!(parse_tqdm_percent("accuracy improved by 23% since"), None);
+        assert_eq!(parse_tqdm_percent("Traceback (most recent call last):"), None);
+        assert_eq!(parse_tqdm_percent(""), None);
+    }
+
+    #[test]
+    fn tqdm_percent_rejects_out_of_range() {
+        assert_eq!(parse_tqdm_percent("999%| bogus"), None);
+        assert_eq!(parse_tqdm_percent("%| no digits"), None);
+    }
+
+    #[test]
+    fn bag_count_parses_driver_line() {
+        // PY_DRIVER 출력: "Selected model is a bag of 4 models."
+        assert_eq!(parse_bag_count("Selected model is a bag of 4 models."), Some(4));
+        assert_eq!(parse_bag_count("bag of 1 models."), Some(1));
+    }
+
+    #[test]
+    fn bag_count_none_for_other_lines() {
+        assert_eq!(parse_bag_count("Separating track test.wav"), None);
+        assert_eq!(parse_bag_count("bag of models"), None); // 숫자 없음
+    }
+}

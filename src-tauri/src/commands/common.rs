@@ -567,3 +567,45 @@ pub fn kill_process_tree(pid: u32) -> Result<(), String> {
         .output();
     Ok(())
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tests — Error Translation (process-page FR-09 매핑)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn separation_maps_gpu_oom() {
+        let msg = translate_error("RuntimeError: CUDA out of memory. Tried to allocate...", ErrorContext::Separation);
+        assert!(msg.contains("그래픽 카드 메모리"));
+    }
+
+    #[test]
+    fn separation_maps_import_error_before_no_such_file() {
+        // E2E 실측 stderr: torchcodec ImportError traceback (파일 경로 라인 포함)
+        let raw = "Traceback (most recent call last):\n  File \"...torchaudio\\_torchcodec.py\", line 84\nImportError: TorchCodec is required";
+        let msg = translate_error(raw, ErrorContext::Separation);
+        assert!(msg.contains("음원 분리 엔진에 문제"), "{}", msg);
+    }
+
+    #[test]
+    fn separation_maps_model_cache_miss() {
+        let msg = translate_error("FileNotFoundError: No such file or directory: 'checkpoint.th'", ErrorContext::Separation);
+        // ImportError 시그널이 없으므로 모델 캐시 미스로 매핑
+        assert!(msg.contains("AI 모델"), "{}", msg);
+    }
+
+    #[test]
+    fn separation_maps_generic_traceback() {
+        let msg = translate_error("Traceback (most recent call last):\nValueError: bad input", ErrorContext::Separation);
+        assert!(msg.contains("음원 분리 중 문제"), "{}", msg);
+    }
+
+    #[test]
+    fn separation_falls_back_to_raw() {
+        let msg = translate_error("some unknown failure", ErrorContext::Separation);
+        assert_eq!(msg, "some unknown failure");
+    }
+}
